@@ -1,4 +1,4 @@
-import type { Backend, ServerStatus, VpnClient } from "../types";
+import type { Backend, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
  * Fake backend for local development, screenshots and tests.
@@ -180,6 +180,16 @@ export class DemoBackend implements Backend {
           : c,
       ),
     });
+  }
+
+  /** The CRL is close to expiry so demo mode shows the warning. */
+  async getPki(): Promise<PkiStatus> {
+    const now = Date.now();
+    return {
+      serverCertExpiresAt: now + 3600 * DAY_MS,
+      caCertExpiresAt: now + 3600 * DAY_MS,
+      crlNextUpdate: now + 20 * DAY_MS,
+    };
   }
 
   async disconnectClient(name: string): Promise<boolean> {

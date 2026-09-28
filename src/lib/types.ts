@@ -34,6 +34,14 @@ export interface VpnClient {
   connectedSince: number | null;
 }
 
+/** Expiry dates of the server's PKI (epoch ms); null when unknown or not used. */
+export interface PkiStatus {
+  serverCertExpiresAt: number | null;
+  caCertExpiresAt: number | null;
+  /** When the CRL must be regenerated; OpenVPN rejects every client after it. */
+  crlNextUpdate: number | null;
+}
+
 /**
  * Data source abstraction. Implementations exist for demo data and for
  * angristan/openvpn-install servers; other installers can add their own.
@@ -47,4 +55,5 @@ export interface Backend {
   revokeClient(name: string): Promise<void>;
   /** Returns true when a live session was found and killed. */
   disconnectClient(name: string): Promise<boolean>;
+  getPki(): Promise<PkiStatus>;
 }

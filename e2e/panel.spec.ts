@@ -28,6 +28,14 @@ test("overview shows server status and online clients", async ({ page }) => {
   await expect(page.getByText("alice-laptop")).toBeVisible();
 });
 
+test("overview warns before the CRL expires", async ({ page }) => {
+  await signIn(page);
+  // Demo data puts the CRL 20 days from expiry.
+  const warning = page.getByRole("alert").filter({ hasText: "certificate revocation list" });
+  await expect(warning).toContainText(/expires in (19|20) days/);
+  await expect(warning).toContainText("easyrsa gen-crl");
+});
+
 test("the server certificate is never listed", async ({ page }) => {
   await signIn(page, "/clients");
   await page.getByLabel("Filter by status").selectOption("all");

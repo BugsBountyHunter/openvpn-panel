@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # openvpn-panel-helper — the ONLY program the panel may run as root (via sudo).
 #
-# Usage: openvpn-panel-helper <add|revoke|list|status> [name]
+# Usage: openvpn-panel-helper <add|revoke|list|status|pki> [name]
 #
 #   add <name>     create a client; prints the .ovpn profile on stdout
 #   revoke <name>  revoke a client certificate
 #   list           list client certificates (JSON)
 #   status         list connected clients (JSON)
+#   pki            expiry of the server cert, CA and CRL (JSON, read-only)
 #
 # Installed root:root 0755 at /usr/local/sbin/openvpn-panel-helper by
 # server/install.sh. It wraps angristan/openvpn-install and never accepts
-# anything but the four verbs above and a strictly validated client name.
+# anything but the verbs above and a strictly validated client name.
 set -euo pipefail
 umask 077
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -25,7 +26,7 @@ die() {
 }
 
 usage() {
-	die "usage: openvpn-panel-helper <add|revoke|list|status> [name]"
+	die "usage: openvpn-panel-helper <add|revoke|list|status|pki> [name]"
 }
 
 [[ $EUID -eq 0 ]] || die "must run as root"
@@ -40,13 +41,59 @@ add | revoke)
 	[[ $name =~ $NAME_RE ]] || die "invalid client name (allowed: 1-32 of A-Z a-z 0-9 _ -)"
 	[[ $name != server_* ]] || die "refusing to modify the server certificate"
 	;;
-list | status)
+list | status | pki)
 	[[ $# -eq 1 ]] || usage
 	;;
 *)
 	usage
 	;;
 esac
+
+# --- pki: read-only, does not need the installer ----------------------------
+
+server_conf() {
+	local candidate
+	for candidate in /etc/openvpn/server/server.conf /etc/openvpn/server.conf; do
+		[[ -f $candidate ]] && { echo "$candidate"; return 0; }
+	done
+	return 1
+}
+
+# Absolute path of a file directive (ca, cert, crl-verify), or nothing.
+conf_file() {
+	local conf=$1 key=$2 value
+	value=$(awk -v key="$key" '$1 == key { print $2; exit }' "$conf")
+	[[ -n $value ]] || return 0
+	[[ $value == /* ]] || value="$(dirname "$conf")/$value"
+	[[ -f $value ]] && echo "$value"
+	return 0
+}
+
+# Converts an OpenSSL date ("Sep 29 10:00:00 2036 GMT") to epoch seconds, or "null".
+epoch_or_null() {
+	local seconds
+	if [[ -n $1 ]] && seconds=$(date -u -d "$1" +%s 2>/dev/null) && [[ $seconds =~ ^[0-9]+$ ]]; then
+		echo "$seconds"
+	else
+		echo null
+	fi
+}
+
+# $1 = file, $2 = x509|crl, $3 = -enddate|-nextupdate
+file_date() {
+	[[ -n $1 ]] || { echo null; return; }
+	epoch_or_null "$(openssl "$2" -in "$1" -noout "$3" 2>/dev/null | cut -d= -f2-)"
+}
+
+if [[ $verb == pki ]]; then
+	conf=$(server_conf) || die "OpenVPN server config not found"
+	# Only numbers or null are printed, so the JSON needs no escaping.
+	printf '{"server_cert_not_after":%s,"ca_cert_not_after":%s,"crl_next_update":%s}\n' \
+		"$(file_date "$(conf_file "$conf" cert)" x509 -enddate)" \
+		"$(file_date "$(conf_file "$conf" ca)" x509 -enddate)" \
+		"$(file_date "$(conf_file "$conf" crl-verify)" crl -nextupdate)"
+	exit 0
+fi
 
 [[ -f $INSTALLER ]] || die "$INSTALLER not found; re-run server/install.sh"
 
