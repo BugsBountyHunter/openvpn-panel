@@ -16,6 +16,7 @@ Requires Node.js ≥ 24.7. No OpenVPN server is needed: `PANEL_MODE=demo`
 
 ```bash
 npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run test:e2e
+test/install/run.sh   # needs Docker: install/update/uninstall in a clean container
 shellcheck server/*.sh server/openvpn-panel-helper server/openvpn-panel-deploy scripts/*.sh
 ```
 

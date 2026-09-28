@@ -1,27 +1,37 @@
 #!/usr/bin/env bash
-# openvpn-panel server installer. Idempotent: safe to re-run for upgrades.
+# openvpn-panel installer and updater. Idempotent: safe to re-run.
 #
-# Run on the VPN server (already set up with angristan/openvpn-install):
+# Quick install (downloads the latest release, verifies it, installs it):
 #
-#   sudo ./server/install.sh [options]
+#   curl -fsSLO https://github.com/BugsBountyHunter/openvpn-panel/releases/latest/download/install.sh
+#   sudo bash install.sh --bind 10.8.0.1
+#
+# Update later (keeps your settings and password):
+#
+#   sudo openvpn-panel-update            # latest release
+#   sudo openvpn-panel-update v0.2.0     # a specific release
 #
 # Options:
-#   --installer PATH       openvpn-install.sh to copy to /usr/local/sbin
-#                          (default: first of ./openvpn-install.sh,
-#                          /root/openvpn-install.sh, ~SUDO_USER/openvpn-install.sh,
-#                          or the copy already installed)
-#   --bind IP              address the panel listens on (default 127.0.0.1;
-#                          use the server's VPN IP, e.g. 10.8.0.1, for VPN-only access)
+#   --bind IP              address the panel listens on (default 127.0.0.1, or the
+#                          current setting on re-runs). Use the VPN IP, e.g.
+#                          10.8.0.1, for VPN-only access. Never 0.0.0.0.
 #   --port PORT            panel port (default 8081)
 #   --admin-user NAME      admin username (default admin)
 #   --reset-password       prompt for a new admin password even if one is set
-#   --mgmt-bridge tcp|unix how the panel reaches the root-owned management
-#                          socket: tcp = socat on 127.0.0.1:7505 (default),
-#                          unix = socat on a 0600 socket owned by the panel user
-#   --deploy-key "KEY"     also create the "openvpn-panel-deploy" SSH user for
+#   --version TAG          release to install: "latest" (default) or e.g. v0.1.0
+#   --installer PATH       openvpn-install.sh to copy to /usr/local/sbin
+#                          (default: ./openvpn-install.sh, /root/openvpn-install.sh,
+#                          ~SUDO_USER/openvpn-install.sh, or the copy already installed)
+#   --mgmt-bridge unix|tcp how the panel reaches the root-owned management socket:
+#                          unix = 0600 socket owned by the panel user (default)
+#                          tcp  = socat on 127.0.0.1:7505 (any local user can connect)
+#   --deploy-key "KEY"     maintainers: create the "openvpn-panel-deploy" SSH user for
 #                          CI deploys, restricted to the deploy script
+#   --app PATH             install this release tarball instead of downloading one
+#   --no-app               only (re)configure the server side; don't install an app
 #
-# Non-interactive: set PANEL_ADMIN_PASSWORD in the environment.
+# Environment: PANEL_ADMIN_PASSWORD (non-interactive installs),
+# OPENVPN_PANEL_REPO (owner/name of a fork).
 set -euo pipefail
 umask 022
 
@@ -34,6 +44,8 @@ readonly DATA_DIR=/var/lib/openvpn-panel
 readonly SBIN=/usr/local/sbin
 readonly HELPER=$SBIN/openvpn-panel-helper
 readonly DEPLOY_SCRIPT=$SBIN/openvpn-panel-deploy
+readonly UPDATE_SCRIPT=$SBIN/openvpn-panel-update
+readonly UNINSTALL_SCRIPT=$SBIN/openvpn-panel-uninstall
 readonly INSTALLER_DST=$SBIN/openvpn-install.sh
 readonly SUDOERS_FILE=/etc/sudoers.d/openvpn-panel
 readonly UNIT_DIR=/etc/systemd/system
@@ -41,6 +53,11 @@ readonly MGMT_TCP_PORT=7505
 readonly MGMT_UNIX_DIR=/run/openvpn-panel-mgmt
 readonly MIN_NODE_MAJOR=24
 readonly MIN_NODE_MINOR=7
+readonly RELEASE_ASSET=openvpn-panel.tar.gz
+
+REPO=${OPENVPN_PANEL_REPO:-BugsBountyHunter/openvpn-panel}
+# Base URL for release downloads; overridable only for tests and mirrors.
+RELEASE_BASE=${OPENVPN_PANEL_RELEASE_URL:-https://github.com/$REPO/releases}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
@@ -50,8 +67,11 @@ bind_ip=127.0.0.1
 port=8081
 admin_user="admin"
 reset_password=false
-mgmt_bridge=tcp
+mgmt_bridge=unix
 deploy_key=""
+version=latest
+app_tarball=""
+no_app=false
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -61,8 +81,28 @@ die() {
 }
 
 usage() {
-	sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+	sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 	exit "${1:-0}"
+}
+
+env_value() {
+	[[ -r $ENV_FILE ]] || return 0
+	sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | sed "s/^'\(.*\)'\$/\1/"
+}
+
+# On re-runs and updates, keep the current settings unless flags override them.
+load_existing_settings() {
+	[[ -r $ENV_FILE ]] || return 0
+	local value
+	value=$(env_value PANEL_HOST) && [[ -n $value ]] && bind_ip=$value
+	value=$(env_value PANEL_PORT) && [[ -n $value ]] && port=$value
+	value=$(env_value ADMIN_USER) && [[ -n $value ]] && admin_user=$value
+	value=$(env_value OVPN_MGMT)
+	case "$value" in
+	tcp:*) mgmt_bridge=tcp ;;
+	unix:*) mgmt_bridge=unix ;;
+	esac
+	return 0
 }
 
 parse_args() {
@@ -73,8 +113,11 @@ parse_args() {
 		--port) port=${2:?--port needs a number}; shift 2 ;;
 		--admin-user) admin_user=${2:?--admin-user needs a name}; shift 2 ;;
 		--reset-password) reset_password=true; shift ;;
-		--mgmt-bridge) mgmt_bridge=${2:?--mgmt-bridge needs tcp or unix}; shift 2 ;;
+		--mgmt-bridge) mgmt_bridge=${2:?--mgmt-bridge needs unix or tcp}; shift 2 ;;
 		--deploy-key) deploy_key=${2:?--deploy-key needs a public key}; shift 2 ;;
+		--version) version=${2:?--version needs a tag}; shift 2 ;;
+		--app) app_tarball=${2:?--app needs a path}; shift 2 ;;
+		--no-app) no_app=true; shift ;;
 		-h | --help) usage 0 ;;
 		*) warn "unknown option: $1"; usage 1 ;;
 		esac
@@ -83,30 +126,94 @@ parse_args() {
 	[[ $bind_ip =~ ^[0-9A-Fa-f.:]+$ ]] || die "invalid --bind (use an IP address)"
 	[[ $bind_ip != 0.0.0.0 && $bind_ip != :: ]] || die "refusing to bind to all interfaces; use 127.0.0.1 or the VPN IP"
 	[[ $admin_user =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "invalid --admin-user"
-	[[ $mgmt_bridge == tcp || $mgmt_bridge == unix ]] || die "--mgmt-bridge must be tcp or unix"
+	[[ $mgmt_bridge == tcp || $mgmt_bridge == unix ]] || die "--mgmt-bridge must be unix or tcp"
+	[[ $version == latest || $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die "--version must be 'latest' or a tag like v0.1.0"
+	[[ $REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "OPENVPN_PANEL_REPO must look like owner/name"
+	if [[ -n $app_tarball ]]; then
+		[[ -f $app_tarball ]] || die "--app: $app_tarball not found"
+		app_tarball=$(cd -- "$(dirname -- "$app_tarball")" && pwd)/$(basename -- "$app_tarball")
+	fi
 	if [[ -n $deploy_key ]]; then
 		local key_re='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^"]*)?$'
 		[[ $deploy_key =~ $key_re && $deploy_key != *$'\n'* ]] || die "--deploy-key must be a single OpenSSH public key line"
 	fi
 }
 
+# --- Bootstrap: fetch and verify a release, then run the installer inside it --
+
+download() {
+	local url=$1 dest=$2
+	case "$url" in
+	https://*) curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$dest" "$url" ;;
+	http://127.0.0.1:* | http://localhost:*) curl -fsSL --retry 3 -o "$dest" "$url" ;; # tests only
+	*) die "refusing to download over an insecure URL: $url" ;;
+	esac
+}
+
+# Runs when install.sh is used on its own (curl-downloaded) or as openvpn-panel-update.
+bootstrap_release() {
+	[[ $EUID -eq 0 ]] || die "run as root: sudo bash $0 $*"
+	for tool in curl tar sha256sum; do
+		command -v "$tool" >/dev/null || die "$tool is required"
+	done
+	local base
+	if [[ $version == latest ]]; then base=$RELEASE_BASE/latest/download; else base=$RELEASE_BASE/download/$version; fi
+
+	local work
+	work=$(mktemp -d /tmp/openvpn-panel-release.XXXXXX)
+	# shellcheck disable=SC2064 # expand now: $work is local
+	trap "rm -rf -- '$work'" EXIT
+	log "downloading openvpn-panel $version from $base"
+	download "$base/$RELEASE_ASSET" "$work/$RELEASE_ASSET" || die "download failed ($base/$RELEASE_ASSET)"
+	download "$base/SHA256SUMS" "$work/SHA256SUMS" || die "checksum download failed"
+	(cd "$work" && grep -E "  $RELEASE_ASSET\$" SHA256SUMS | sha256sum -c --quiet -) ||
+		die "checksum verification FAILED for $RELEASE_ASSET — not installing"
+	log "checksum verified"
+
+	mkdir "$work/bundle"
+	tar -xzf "$work/$RELEASE_ASSET" -C "$work/bundle" --no-same-owner
+	[[ -f $work/bundle/server/install.sh ]] || die "release does not contain server/install.sh"
+	bash "$work/bundle/server/install.sh" "$@" --app "$work/$RELEASE_ASSET"
+}
+
+# --- Installation ------------------------------------------------------------
+
+suggest_node() {
+	local candidate=""
+	if [[ -n ${SUDO_USER-} ]]; then
+		local home
+		home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+		candidate=$(find "$home/.nvm/versions/node" -maxdepth 3 -path '*/bin/node' 2>/dev/null | sort -V | tail -n1 || true)
+	fi
+	if [[ -n $candidate ]]; then
+		warn "found Node in nvm ($candidate), which the service cannot use from your home directory."
+		warn "Copy it to a system path, then re-run this installer:"
+		warn "    sudo install -m 0755 $candidate /usr/local/bin/node"
+	else
+		warn "install Node.js >= $MIN_NODE_MAJOR.$MIN_NODE_MINOR, e.g. from your distribution or https://nodejs.org/en/download"
+	fi
+}
+
 check_prereqs() {
 	[[ $EUID -eq 0 ]] || die "run as root (sudo $0)"
 	command -v systemctl >/dev/null || die "systemd is required"
-	command -v visudo >/dev/null || die "sudo/visudo is required (apt install sudo)"
-	command -v socat >/dev/null || die "socat is required (apt install socat)"
-	command -v curl >/dev/null || die "curl is required (apt install curl)"
-	command -v node >/dev/null || die "Node.js >= $MIN_NODE_MAJOR.$MIN_NODE_MINOR is required (https://nodejs.org/en/download)"
-	local version major minor
-	version=$(node -p 'process.versions.node')
-	major=${version%%.*}
-	minor=${version#*.}
+	local tool
+	for tool in visudo socat curl flock tar; do
+		command -v "$tool" >/dev/null || die "$tool is required (apt install sudo socat curl util-linux tar)"
+	done
+	if ! command -v node >/dev/null; then
+		suggest_node
+		die "Node.js >= $MIN_NODE_MAJOR.$MIN_NODE_MINOR is required in a system path"
+	fi
+	local node_version major minor
+	node_version=$(node -p 'process.versions.node')
+	major=${node_version%%.*}
+	minor=${node_version#*.}
 	minor=${minor%%.*}
 	if ((major < MIN_NODE_MAJOR || (major == MIN_NODE_MAJOR && minor < MIN_NODE_MINOR))); then
-		die "Node.js $version found; >= $MIN_NODE_MAJOR.$MIN_NODE_MINOR is required"
+		suggest_node
+		die "Node.js $node_version found; >= $MIN_NODE_MAJOR.$MIN_NODE_MINOR is required"
 	fi
-	[[ -f $SCRIPT_DIR/openvpn-panel-helper && -f $SCRIPT_DIR/openvpn-panel-deploy ]] ||
-		die "run this script from a checkout of the openvpn-panel repository"
 	[[ -f $REPO_DIR/scripts/hash-password.mjs ]] || die "missing $REPO_DIR/scripts/hash-password.mjs"
 }
 
@@ -129,7 +236,7 @@ install_installer() {
 		fi
 		candidates+=("$INSTALLER_DST")
 	fi
-	local src=""
+	local src="" c
 	for c in "${candidates[@]}"; do
 		[[ -f $c ]] && { src=$c; break; }
 	done
@@ -157,14 +264,16 @@ create_user() {
 install_scripts() {
 	install -o root -g root -m 0755 "$SCRIPT_DIR/openvpn-panel-helper" "$HELPER"
 	install -o root -g root -m 0755 "$SCRIPT_DIR/openvpn-panel-deploy" "$DEPLOY_SCRIPT"
-	log "helper installed at $HELPER"
+	install -o root -g root -m 0755 "$SCRIPT_DIR/install.sh" "$UPDATE_SCRIPT"
+	install -o root -g root -m 0755 "$SCRIPT_DIR/uninstall.sh" "$UNINSTALL_SCRIPT"
+	log "helper, deploy, update and uninstall commands installed in $SBIN"
 }
 
 write_sudoers() {
 	local tmp
 	tmp=$(mktemp)
 	{
-		echo "# Managed by openvpn-panel server/install.sh — do not edit."
+		echo "# Managed by openvpn-panel install.sh — do not edit."
 		echo "# The panel user may run ONLY the helper, which validates its own arguments."
 		echo "Defaults:$PANEL_USER !requiretty, !lecture, env_reset"
 		echo "$PANEL_USER ALL=(root) NOPASSWD: $HELPER"
@@ -211,7 +320,7 @@ write_mgmt_bridge() {
 		mgmt_env="unix:$MGMT_UNIX_DIR/mgmt.sock"
 	fi
 	cat >"$UNIT_DIR/openvpn-panel-mgmt.service" <<EOF
-# Installed by openvpn-panel server/install.sh
+# Installed by openvpn-panel install.sh
 [Unit]
 Description=openvpn-panel bridge to the OpenVPN management socket
 After=openvpn-server@server.service openvpn@server.service
@@ -247,7 +356,7 @@ hash_password() {
 		password=$PANEL_ADMIN_PASSWORD
 	else
 		[[ -t 0 ]] || die "no terminal to prompt for the admin password; set PANEL_ADMIN_PASSWORD"
-		read -rsp "Admin password for '$admin_user' (min 12 chars): " password
+		read -rsp "Choose the panel admin password for '$admin_user' (min 12 chars): " password
 		echo >&2
 		read -rsp "Repeat password: " confirm
 		echo >&2
@@ -255,10 +364,6 @@ hash_password() {
 	fi
 	# Password goes through stdin, never argv; only the hash is stored.
 	printf '%s' "$password" | node "$REPO_DIR/scripts/hash-password.mjs"
-}
-
-env_value() {
-	sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | sed "s/^'\(.*\)'\$/\1/"
 }
 
 write_env() {
@@ -269,7 +374,7 @@ write_env() {
 	else
 		hash=$(hash_password) || die "could not hash the password"
 	fi
-	secret=$([[ -f $ENV_FILE ]] && env_value SESSION_SECRET || true)
+	secret=$(env_value SESSION_SECRET)
 	if [[ ${#secret} -lt 32 ]]; then
 		secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 	fi
@@ -277,8 +382,8 @@ write_env() {
 	tmp=$(mktemp "$CONF_DIR/.env.XXXXXX")
 	# systemd EnvironmentFile: single quotes keep "$" in the hash literal.
 	cat >"$tmp" <<EOF
-# openvpn-panel configuration — written by server/install.sh.
-# Re-run install.sh to change it; edit by hand at your own risk.
+# openvpn-panel configuration — written by install.sh.
+# Re-run the installer (or openvpn-panel-update) to change it.
 PANEL_MODE=live
 PANEL_HOST=$bind_ip
 PANEL_PORT=$port
@@ -315,19 +420,29 @@ setup_deploy_user() {
 	log "deploy key installed for $DEPLOY_USER (forced command: $DEPLOY_SCRIPT)"
 }
 
+installed_version() {
+	cat "$APP_DIR/current/VERSION" 2>/dev/null || echo none
+}
+
 start_services() {
 	install -o root -g root -m 0644 "$SCRIPT_DIR/systemd/openvpn-panel.service" "$UNIT_DIR/openvpn-panel.service"
 	systemctl daemon-reload
 	systemctl enable --now openvpn-panel-mgmt.service >/dev/null
 	systemctl restart openvpn-panel-mgmt.service
 	systemctl enable openvpn-panel.service >/dev/null
-	if [[ -e $APP_DIR/current/start.mjs ]]; then
+}
+
+install_app() {
+	if [[ -n $app_tarball ]]; then
+		local new
+		new=$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)
+		log "installing openvpn-panel $new (currently: $(installed_version))"
+		"$DEPLOY_SCRIPT" <"$app_tarball" || die "deploy failed; the previous version (if any) is still running"
+	elif [[ -e $APP_DIR/current/start.mjs ]]; then
 		systemctl restart openvpn-panel.service
-		log "openvpn-panel restarted"
+		log "openvpn-panel $(installed_version) restarted"
 	else
-		warn "no release deployed yet — push to main (GitHub Actions) or run:"
-		warn "    npm ci && npm run build && scripts/package-release.sh"
-		warn "    sudo $DEPLOY_SCRIPT < release.tar.gz"
+		warn "no app installed yet. Run the installer without --no-app to download the latest release."
 	fi
 }
 
@@ -335,26 +450,25 @@ print_summary() {
 	local vpn_ip
 	vpn_ip=$(ip -4 -o addr show dev tun0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)
 	echo
-	log "Done. The panel listens on http://$bind_ip:$port"
+	log "Done: openvpn-panel $(installed_version) on http://$bind_ip:$port"
 	if [[ $bind_ip == 127.0.0.1 ]]; then
-		echo "    It is only reachable from this machine. From your laptop:"
+		echo "    Only reachable from this machine. From your laptop:"
 		echo "      ssh -L $port:127.0.0.1:$port <you>@<this-server>   then open http://127.0.0.1:$port"
 		if [[ -n $vpn_ip ]]; then
 			echo "    Or re-run with --bind $vpn_ip to reach it over the VPN."
 		fi
 	else
-		echo "    Allow it on the VPN interface only (ufw):"
+		echo "    If ufw is active, allow it on the VPN interface only:"
 		echo "      ufw allow in on tun0 to $bind_ip port $port proto tcp"
 		echo "    Never expose the panel on a public interface."
 	fi
 	if [[ $mgmt_bridge == tcp ]]; then
 		echo "    Note: the management bridge on 127.0.0.1:$MGMT_TCP_PORT is reachable by every local user."
-		echo "    On shared hosts prefer --mgmt-bridge unix (see SECURITY.md)."
 	fi
+	echo "    Update: sudo openvpn-panel-update    Uninstall: sudo openvpn-panel-uninstall"
 }
 
 main() {
-	parse_args "$@"
 	check_prereqs
 	find_server_conf >/dev/null || die "OpenVPN server config not found; install OpenVPN with openvpn-install.sh first"
 	install_installer
@@ -366,7 +480,39 @@ main() {
 	write_mgmt_bridge
 	write_env
 	start_services
+	install_app
 	print_summary
 }
 
-main "$@"
+# --- Entry point ---------------------------------------------------------------
+
+# Invoked as "openvpn-panel-update [TAG]": fetch that release and re-run.
+if [[ $(basename -- "$0") == openvpn-panel-update ]]; then
+	load_existing_settings
+	update_args=()
+	if [[ $# -gt 0 && $1 != -* ]]; then
+		update_args=(--version "$1")
+		shift
+	fi
+	parse_args "${update_args[@]}" "$@"
+	bootstrap_release "${update_args[@]}" "$@"
+	exit 0
+fi
+
+load_existing_settings
+parse_args "$@"
+
+if [[ ! -f $SCRIPT_DIR/openvpn-panel-helper ]]; then
+	# Standalone install.sh (e.g. downloaded with curl): get the release bundle.
+	bootstrap_release "$@"
+	exit 0
+fi
+
+if [[ -z $app_tarball && $no_app == false && ! -f $REPO_DIR/server.js ]]; then
+	# Source checkout without a built app: install the published release.
+	# (Maintainers testing local changes: build, package, and pass --app.)
+	bootstrap_release "$@"
+	exit 0
+fi
+
+main

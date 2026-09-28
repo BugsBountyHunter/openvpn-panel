@@ -12,6 +12,116 @@ trail — without handing a web app root access.
 
 ![Clients page in demo mode](docs/screenshot-clients.png)
 
+## Quick install
+
+On an Ubuntu/Debian server where OpenVPN was installed with
+[openvpn-install.sh](https://github.com/angristan/openvpn-install):
+
+```bash
+curl -fsSLO https://github.com/BugsBountyHunter/openvpn-panel/releases/latest/download/install.sh
+sudo bash install.sh --bind 10.8.0.1
+```
+
+- `--bind` is the address the panel listens on. Use your server's **VPN IP**
+  (usually `10.8.0.1`, see `ip addr show tun0`) so only VPN users can reach it,
+  or leave it out for `127.0.0.1` and use an SSH tunnel.
+- You'll be asked to **choose the panel admin password**. Only its hash is
+  stored.
+- The installer downloads the latest release, **verifies its SHA-256
+  checksum**, sets everything up and starts the panel.
+
+Then connect to your VPN and open **http://10.8.0.1:8081**, user `admin`.
+
+If `ufw` is active, allow the panel on the VPN interface only:
+
+```bash
+sudo ufw allow in on tun0 to 10.8.0.1 port 8081 proto tcp
+```
+
+### Requirements
+
+- Linux with systemd; `sudo`, `socat`, `curl` (`apt install sudo socat curl`).
+- OpenVPN installed with a recent
+  [openvpn-install.sh](https://github.com/angristan/openvpn-install) (it must
+  have the `client` CLI and `OUTPUT_FORMAT=json`). The installer looks for it in
+  the current directory, `/root` and your home directory, or pass
+  `--installer /path/to/openvpn-install.sh`.
+- **Node.js ≥ 24.7** in a system path (`/usr/bin/node` or
+  `/usr/local/bin/node`). If you use `nvm`, copy its binary once. The service
+  cannot see your home directory, and the installer prints this command for you:
+
+  ```bash
+  sudo install -m 0755 "$(command -v node)" /usr/local/bin/node
+  ```
+
+Tested on Ubuntu 24.04 with OpenVPN 2.7.7, plus recorded output from OpenVPN
+2.5 and 2.6.
+
+### Verify the download (optional)
+
+Releases are built by GitHub Actions with signed build provenance:
+
+```bash
+gh attestation verify install.sh -R BugsBountyHunter/openvpn-panel
+```
+
+### Update
+
+```bash
+sudo openvpn-panel-update            # latest release
+sudo openvpn-panel-update v0.2.0     # or a specific one
+```
+
+Your settings and password are kept. The new version is health-checked and the
+previous one is restored automatically if it fails. Re-running `install.sh`
+with different options (e.g. `--port 9000`, `--reset-password`) changes
+settings the same way.
+
+### Uninstall
+
+```bash
+sudo openvpn-panel-uninstall           # keeps /etc/openvpn-panel and the audit log
+sudo openvpn-panel-uninstall --purge   # removes them too
+```
+
+OpenVPN and your clients are not affected.
+
+### Installer options
+
+| Option | Default | |
+| --- | --- | --- |
+| `--bind IP` | `127.0.0.1` | listen address; the VPN IP for VPN-only access. `0.0.0.0` is refused. |
+| `--port PORT` | `8081` | |
+| `--admin-user NAME` | `admin` | |
+| `--reset-password` | | ask for a new admin password |
+| `--version TAG` | `latest` | install a specific release |
+| `--installer PATH` | auto | path to your `openvpn-install.sh` |
+| `--mgmt-bridge unix\|tcp` | `unix` | how the panel reaches OpenVPN's management socket (see SECURITY.md) |
+
+Non-interactive installs: set `PANEL_ADMIN_PASSWORD` in the environment.
+
+### What gets installed
+
+| Path | Purpose |
+| --- | --- |
+| `/opt/openvpn-panel/releases/*`, `current` | app releases (last 3 kept) |
+| `/etc/openvpn-panel/env` | configuration, `0600 root` |
+| `/var/lib/openvpn-panel/audit.log` | audit log |
+| `/usr/local/sbin/openvpn-panel-helper` | the only command the panel may `sudo` |
+| `/usr/local/sbin/openvpn-panel-update`, `-uninstall`, `-deploy` | maintenance commands |
+| `/usr/local/sbin/openvpn-install.sh` | root-only copy of your installer |
+| `/etc/sudoers.d/openvpn-panel` | sudo rule for the helper |
+| `openvpn-panel.service`, `openvpn-panel-mgmt.service` | the panel and its management-socket bridge |
+
+## Try it without a server (demo mode)
+
+```bash
+git clone https://github.com/BugsBountyHunter/openvpn-panel.git && cd openvpn-panel
+npm ci && npm run dev
+```
+
+Open http://127.0.0.1:8081 and sign in as `admin` / `demo`. The data is fake.
+
 ## Features
 
 - **Overview** — OpenVPN up/down, uptime, connected clients, total traffic,
@@ -35,7 +145,7 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
                status / kill       │                    │  sudo -n (only this program)
                                    ▼                    ▼
        socat bridge ─▶ OpenVPN management socket   /usr/local/sbin/openvpn-panel-helper
-       (127.0.0.1:7505 or 0600 unix socket)             │  add | revoke | list | status
+       (0600 unix socket or 127.0.0.1:7505)             │  add | revoke | list | status
                                                         ▼
                                            openvpn-install.sh client … (root)
 ```
@@ -51,6 +161,8 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
 
 ## Security model
 
+- Releases are checksum-verified by the installer and carry GitHub build
+  provenance.
 - Binds to `127.0.0.1` by default. Use the server's VPN IP (e.g. `10.8.0.1`)
   to reach it over the VPN only; never expose it publicly.
 - The panel runs as an unprivileged system user in a hardened systemd unit.
@@ -64,76 +176,6 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
   configured through environment variables.
 
 Details and known trade-offs: [SECURITY.md](SECURITY.md).
-
-## Requirements
-
-- A Linux server set up with a recent
-  [openvpn-install.sh](https://github.com/angristan/openvpn-install) (with the
-  `client` CLI and `OUTPUT_FORMAT=json`), systemd, `sudo`, `socat`, `curl`.
-- **Node.js ≥ 24.7** on the server (uses `crypto.argon2`), installed at a
-  system path such as `/usr/local/bin/node` or `/usr/bin/node`. A Node from
-  `nvm` in your home directory is not visible to the service (the systemd
-  sandbox hides `/home`) — copy the binary or use your distro/NodeSource
-  package:
-
-  ```bash
-  sudo install -m 0755 "$(command -v node)" /usr/local/bin/node
-  ```
-
-Tested on Ubuntu 24.04 with OpenVPN 2.7.7 (management interface v6), plus
-recorded output from OpenVPN 2.5 and 2.6.
-
-## Try it locally (demo mode)
-
-```bash
-npm ci
-npm run dev
-```
-
-Open http://127.0.0.1:8081 and sign in as `admin` / `demo`. Demo mode is the
-default whenever `PANEL_MODE` is not `live`.
-
-## Install on your VPN server
-
-1. Install Node.js ≥ 24.7, then clone this repository on the server:
-
-   ```bash
-   git clone https://github.com/BugsBountyHunter/openvpn-panel.git && cd openvpn-panel
-   ```
-
-2. Run the installer (prompts for the admin password; only its hash is stored):
-
-   ```bash
-   sudo ./server/install.sh --bind 10.8.0.1
-   ```
-
-   Useful options: `--port 8081`, `--admin-user admin`,
-   `--installer /root/openvpn-install.sh`, `--mgmt-bridge unix`,
-   `--reset-password`, `--deploy-key "ssh-ed25519 AAAA…"`. Run with `--help`
-   for all of them. It is idempotent — re-run it any time.
-
-3. Deploy a build — either through GitHub Actions (below) or by hand:
-
-   ```bash
-   npm ci && npm run build && scripts/package-release.sh
-   sudo /usr/local/sbin/openvpn-panel-deploy < release.tar.gz
-   ```
-
-4. Allow the port on the VPN interface only, e.g.
-   `ufw allow in on tun0 to 10.8.0.1 port 8081 proto tcp`.
-
-### What the installer sets up
-
-| Path | Purpose |
-| --- | --- |
-| `/usr/local/sbin/openvpn-install.sh` | root-only copy of the installer |
-| `/usr/local/sbin/openvpn-panel-helper` | the only command the panel may `sudo` |
-| `/etc/sudoers.d/openvpn-panel` | sudo rule for the helper (and deploy script) |
-| `/etc/openvpn-panel/env` | configuration, `0600 root` |
-| `/var/lib/openvpn-panel/audit.log` | audit log |
-| `/opt/openvpn-panel/releases/*`, `current` | deployed releases |
-| `openvpn-panel.service` | the panel |
-| `openvpn-panel-mgmt.service` | socat bridge to the management socket |
 
 ## Deployment options
 
@@ -151,7 +193,7 @@ container.
 
 ## Configuration
 
-All settings are environment variables, validated at startup
+The installer writes these for you. All settings are environment variables, validated at startup
 (see [.env.example](.env.example)):
 
 | Variable | Default | Notes |
@@ -159,54 +201,50 @@ All settings are environment variables, validated at startup
 | `PANEL_MODE` | `demo` | `live` for a real server |
 | `PANEL_HOST` | `127.0.0.1` | bind address |
 | `PANEL_PORT` | `8081` | |
-| `OVPN_MGMT` | `tcp:127.0.0.1:7505` | or `unix:/path/to.sock` |
+| `OVPN_MGMT` | `tcp:127.0.0.1:7505` | or `unix:/path/to.sock` (the installer uses a unix socket) |
 | `PANEL_HELPER` | `/usr/local/sbin/openvpn-panel-helper` | |
 | `ADMIN_USER` | `admin` | |
 | `ADMIN_PASSWORD_HASH` | — | required in live mode; `npm run hash-password` |
 | `SESSION_SECRET` | — | ≥ 32 chars, required in live mode |
 | `AUDIT_LOG_PATH` | `./data/audit.log` | |
 
-## Continuous deployment (GitHub Actions)
+## For maintainers
 
-`ci.yml` runs lint, typecheck, tests, build and ShellCheck on every push and
-PR. `deploy.yml` runs on pushes to `main`: it builds the standalone bundle,
-packs it into `release.tar.gz` and pipes it over SSH to the server, where
-`openvpn-panel-deploy` installs it, checks `/api/health` and rolls back on
-failure (keeping the last 3 releases).
+### Publishing a release
 
-1. Create a dedicated key pair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.
-2. On the server: `sudo ./server/install.sh --deploy-key "$(cat deploy_key.pub)"`.
+1. Bump `version` in `package.json`, update `CHANGELOG.md`, merge to `main`.
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+
+`release.yml` checks that the tag matches `package.json`, runs all checks,
+builds the bundle (`openvpn-panel.tar.gz`: app + server scripts + `VERSION`),
+writes `SHA256SUMS`, attests build provenance and publishes the GitHub release.
+Every `openvpn-panel-update` picks it up.
+
+### Continuous deployment to your own server (optional)
+
+`deploy.yml` deploys every push to `main` to one server over SSH. It uses the
+same health check and rollback. Most users don't need this; it's for running
+the development version.
+
+1. Create a key pair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.
+2. On the server: `sudo openvpn-panel-update --deploy-key "$(cat deploy_key.pub)"`.
    The key can do nothing but run the deploy script.
-3. Add repository secrets:
-   - `DEPLOY_HOST` — server hostname or IP
-   - `DEPLOY_SSH_KEY` — contents of `deploy_key`
-   - `DEPLOY_KNOWN_HOSTS` — output of `ssh-keyscan -t ed25519 <host>`
-     (verify the fingerprint out of band)
-   - optional repository *variable* `DEPLOY_SSH_PORT` (default 22)
+3. Add repository secrets `DEPLOY_HOST`, `DEPLOY_SSH_KEY` (the private key) and
+   `DEPLOY_KNOWN_HOSTS` (`ssh-keyscan -t ed25519 <host>`, fingerprint verified
+   out of band); optional variable `DEPLOY_SSH_PORT`.
 
-Add them as *repository* secrets. The deploy job runs in a `production`
-environment: add required reviewers there if every deploy should need a manual
-approval.
+Without these secrets (e.g. in forks) the deploy job is skipped. Deploys run in
+a `production` environment where you can require approvals.
 
-Without these secrets (e.g. in forks) the deploy job is skipped, not failed.
-
-## Upgrade
-
-- **Panel:** push to `main`, or build and pipe a new `release.tar.gz` into
-  `openvpn-panel-deploy`.
-- **Server scripts:** `git pull && sudo ./server/install.sh` (keeps your
-  password and settings).
-- **openvpn-install.sh:** update your copy, then
-  `sudo ./server/install.sh --installer /path/to/openvpn-install.sh`.
-
-## Uninstall
+### Installing a local build
 
 ```bash
-sudo ./server/uninstall.sh           # keeps /etc/openvpn-panel and the audit log
-sudo ./server/uninstall.sh --purge   # removes them too
+npm ci && npm run build && scripts/package-release.sh
+scp release.tar.gz you@server:
+# on the server:
+mkdir -p panel-build && tar -xzf release.tar.gz -C panel-build
+sudo bash panel-build/server/install.sh --app release.tar.gz
 ```
-
-OpenVPN and your clients are not affected.
 
 ## Development
 
@@ -227,7 +265,8 @@ npm run typecheck
 | Unit | parsers (recorded `status 3` from OpenVPN 2.5/2.6/2.7), management client against a fake server, sessions, password hashing, rate limiting, audit log, helper runner |
 | Integration | every API route and the proxy: login, CSRF, add → disconnect → revoke lifecycle, audit entries, `server_*` protection |
 | E2E | Playwright on the production build: login, add/download, confirmations, audit page, sign-out, security headers, no horizontal scroll on mobile |
-| Server scripts | ShellCheck in CI; helper/deploy smoke-tested in a Debian container |
+| Install / update | the real one-command install, tampered-download refusal, update keeping settings, and uninstall, in a clean Debian container against a fake release server |
+| Server scripts | ShellCheck |
 
 CI runs all of the above on every push and pull request; line coverage must
 stay above 80 %.
