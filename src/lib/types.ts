@@ -40,6 +40,11 @@ export interface CertOptions {
   certDays?: number;
 }
 
+export interface AddOptions extends CertOptions {
+  /** Encrypts the client's private key; the user is asked for it on connect. */
+  passphrase?: string;
+}
+
 /** Expiry dates of the server's PKI (epoch ms); null when unknown or not used. */
 export interface PkiStatus {
   serverCertExpiresAt: number | null;
@@ -57,7 +62,7 @@ export interface Backend {
   getStatus(): Promise<ServerStatus>;
   listClients(): Promise<VpnClient[]>;
   /** Creates a client and returns the .ovpn profile. Never persist it. */
-  addClient(name: string): Promise<string>;
+  addClient(name: string, options?: AddOptions): Promise<string>;
   revokeClient(name: string): Promise<void>;
   /** Re-issues a client certificate and returns the new .ovpn profile. The old one stops working. */
   renewClient(name: string, options?: CertOptions): Promise<string>;

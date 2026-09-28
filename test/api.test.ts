@@ -125,6 +125,25 @@ describe("API", () => {
     expect(actions).toEqual(["add", "disconnect", "revoke"]);
   });
 
+  it("adds a client with options without logging the passphrase", async () => {
+    const cookie = await login();
+    const passphrase = "correct horse battery";
+    const res = await r.clients.POST(
+      req("/api/clients", { method: "POST", body: { name: "locked-1", certDays: 30, passphrase }, cookie }),
+      {},
+    );
+    expect(res.status).toBe(201);
+    expect(auditActions().at(-1)).toMatchObject({ action: "add", target: "locked-1", ok: true });
+    const log = readFileSync(auditPath, "utf8");
+    expect(log).toContain("30 days, passphrase");
+    expect(log).not.toContain(passphrase);
+
+    for (const body of [{ name: "x1", certDays: 0 }, { name: "x2", passphrase: "short" }, { name: "x3", certDays: "30" }]) {
+      const bad = await r.clients.POST(req("/api/clients", { method: "POST", body, cookie }), {});
+      expect(bad.status).toBe(400);
+    }
+  });
+
   it("renews a client, streams the new profile and audits it", async () => {
     const cookie = await login();
     const res = await r.renew.POST(

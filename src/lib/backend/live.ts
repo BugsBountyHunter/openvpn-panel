@@ -3,7 +3,7 @@ import { HelperError, type HelperRunner } from "../helper";
 import { MgmtError, type MgmtClient } from "../mgmt/client";
 import { parseKill, parseLoadStats, parseState, parseStatus3, parseVersion, type MgmtClientEntry } from "../mgmt/parse";
 import { CLIENT_NAME_PATTERN } from "../names";
-import type { Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
+import type { AddOptions, Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
  * Backend for servers installed with angristan/openvpn-install:
@@ -215,10 +215,10 @@ export class LiveBackend implements Backend {
     return mergeClients(certs.value, sessions);
   }
 
-  async addClient(name: string): Promise<string> {
+  async addClient(name: string, options?: AddOptions): Promise<string> {
     assertName(name);
     try {
-      return assertProfile(await this.helper.run("add", name));
+      return assertProfile(await this.helper.run("add", name, options));
     } finally {
       this.invalidateCerts();
     }

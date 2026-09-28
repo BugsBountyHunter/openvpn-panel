@@ -61,6 +61,33 @@ test("add client downloads the profile", async ({ page }) => {
   await expect(clientRow(page, "e2e-laptop")).toBeVisible();
 });
 
+test("add client with a validity and a passphrase", async ({ page }) => {
+  await signIn(page, "/clients");
+  await page.getByRole("button", { name: "Add client" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add client" });
+  const submit = dialog.getByRole("button", { name: "Create & download" });
+  await dialog.getByLabel("Client name").fill("e2e-locked");
+  await dialog.getByLabel("Certificate validity (days)").fill("30");
+  await dialog.getByLabel("Protect the private key with a passphrase").check();
+  await dialog.getByLabel("Passphrase", { exact: true }).fill("short");
+  await expect(submit).toBeDisabled();
+  await dialog.getByLabel("Passphrase", { exact: true }).fill("correct horse battery");
+  await dialog.getByLabel("Confirm passphrase").fill("correct horse batter");
+  await expect(dialog).toContainText("Passphrases do not match.");
+  await expect(submit).toBeDisabled();
+  await dialog.getByLabel("Confirm passphrase").fill("correct horse battery");
+
+  const downloadPromise = page.waitForEvent("download");
+  await submit.click();
+  expect((await downloadPromise).suggestedFilename()).toBe("e2e-locked.ovpn");
+  await expect(clientRow(page, "e2e-locked")).toContainText(/\((29|30)d\)/);
+
+  await page.goto("/audit");
+  const row = page.getByRole("row").filter({ hasText: "Added client" }).filter({ hasText: "e2e-locked" });
+  await expect(row).toContainText("30 days, passphrase");
+  await expect(page.getByText("correct horse battery")).toHaveCount(0);
+});
+
 test("duplicate names are refused", async ({ page }) => {
   await signIn(page, "/clients");
   await page.getByRole("button", { name: "Add client" }).click();

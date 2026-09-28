@@ -34,6 +34,12 @@ describe("PanelService with the demo backend", () => {
     expect(clients.find((c) => c.name === "new-client")?.status).toBe("active");
   });
 
+  it("passes add options to the backend", async () => {
+    await panel.addClient("short-lived", { certDays: 30, passphrase: "correct horse" });
+    const client = (await panel.listClients()).find((c) => c.name === "short-lived");
+    expect(client?.daysRemaining).toBeLessThanOrEqual(30);
+  });
+
   it("rejects duplicate names", async () => {
     await expect(panel.addClient("alice-laptop")).rejects.toMatchObject({ status: 409 });
   });

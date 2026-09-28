@@ -1,5 +1,5 @@
 import { isServerCn } from "./names";
-import type { Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "./types";
+import type { AddOptions, Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "./types";
 
 /** Error whose message is safe to show to the (authenticated) admin. */
 export class PanelError extends Error {
@@ -46,13 +46,13 @@ export class PanelService {
     return clients.filter((c) => !isServerCn(c.name)).toSorted(compareClients);
   }
 
-  async addClient(name: string): Promise<string> {
+  async addClient(name: string, options?: AddOptions): Promise<string> {
     assertNotServer(name);
     const existing = await this.backend.listClients();
     if (existing.some((c) => c.name === name)) {
       throw new PanelError(`A client named "${name}" already exists`, 409);
     }
-    return this.backend.addClient(name);
+    return this.backend.addClient(name, options);
   }
 
   async revokeClient(name: string): Promise<void> {

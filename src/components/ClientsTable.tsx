@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition, type FormEvent } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { formatBytes, formatDuration } from "@/lib/format";
-import { CLIENT_NAME_PATTERN } from "@/lib/names";
-import type { VpnClient } from "@/lib/types";
+import type { AddOptions, VpnClient } from "@/lib/types";
+import { AddClientDialog } from "./AddClientDialog";
 import { addClientAndDownload, apiPost, renewClientAndDownload, UnauthorizedError } from "./api-client";
 import { Button, Modal } from "./Modal";
 import { RenewDialog } from "./RenewDialog";
@@ -38,7 +38,6 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
   const [query, setQuery] = useState("");
   const [showRevoked, setShowRevoked] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [newName, setNewName] = useState("");
   const [pending, setPending] = useState<PendingAction>(null);
   const [renewing, setRenewing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,11 +52,11 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
   }, [clients, query, showRevoked]);
 
   const revokedCount = clients.filter((c) => c.status === "revoked").length;
-  const nameValid = CLIENT_NAME_PATTERN.test(newName) && !newName.startsWith("server_");
 
   const refresh = () => startTransition(() => router.refresh());
 
-  async function run(action: () => Promise<void>, success: string) {
+  /** Resolves true when the action succeeded. */
+  async function run(action: () => Promise<void>, success: string): Promise<boolean> {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -65,25 +64,23 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
       await action();
       setNotice(success);
       refresh();
+      return true;
     } catch (err) {
       if (err instanceof UnauthorizedError) {
         router.push("/login");
-        return;
+        return false;
       }
       setError(err instanceof Error ? err.message : "Something went wrong");
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  async function onAdd(event: FormEvent) {
-    event.preventDefault();
-    if (!nameValid) return;
-    const name = newName;
-    await run(async () => {
-      await addClientAndDownload(name);
+  function onAdd(name: string, options: AddOptions): Promise<boolean> {
+    return run(async () => {
+      await addClientAndDownload(name, options);
       setAddOpen(false);
-      setNewName("");
     }, `Created "${name}". The profile was downloaded and is not stored on the server.`);
   }
 
@@ -203,34 +200,7 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
         </table>
       </div>
 
-      <Modal open={addOpen} title="Add client" onClose={() => setAddOpen(false)}>
-        <form onSubmit={onAdd} className="space-y-4">
-          <div>
-            <label htmlFor="client-name" className="text-sm font-medium">Client name</label>
-            <input
-              id="client-name"
-              autoFocus
-              autoComplete="off"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              maxLength={32}
-              className="mt-1 w-full rounded-md border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-              placeholder="e.g. alice-laptop"
-            />
-            <p className="mt-1.5 text-xs text-muted">
-              1–32 characters: letters, digits, <code>-</code> and <code>_</code>. The .ovpn profile downloads once
-              and is never stored by the panel — keep it safe.
-            </p>
-          </div>
-          {error && addOpen ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
-          <div className="flex justify-end gap-2">
-            <Button onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button type="submit" variant="primary" disabled={!nameValid || busy}>
-              {busy ? "Creating…" : "Create & download"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      <AddClientDialog open={addOpen} busy={busy} error={error} onClose={() => setAddOpen(false)} onAdd={onAdd} />
 
       <RenewDialog name={renewing} busy={busy} error={error} onClose={() => setRenewing(null)} onRenew={onRenew} />
 

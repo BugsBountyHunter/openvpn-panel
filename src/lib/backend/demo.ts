@@ -1,5 +1,5 @@
 import { CERT_DAYS_DEFAULT } from "../cert-days";
-import type { Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
+import type { AddOptions, Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
  * Fake backend for local development, screenshots and tests.
@@ -150,7 +150,7 @@ export class DemoBackend implements Backend {
     return getState().clients.map((c) => toVpnClient(c, now));
   }
 
-  async addClient(name: string): Promise<string> {
+  async addClient(name: string, options: AddOptions = {}): Promise<string> {
     const state = getState();
     if (state.clients.some((c) => c.name === name)) {
       throw new Error(`Client "${name}" already exists`);
@@ -158,7 +158,7 @@ export class DemoBackend implements Backend {
     const client: DemoClient = {
       name,
       status: "active",
-      certExpiry: isoDate(Date.now() + 3650 * DAY_MS),
+      certExpiry: isoDate(Date.now() + (options.certDays ?? CERT_DAYS_DEFAULT) * DAY_MS),
       connectedSince: null,
       realIp: null,
       vpnIp: null,

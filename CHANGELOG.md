@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Add client: optional certificate validity (1–7300 days) and optional
+  passphrase-protected private key. The passphrase is sent to the helper on
+  stdin and never appears in argv, logs, the audit log or on disk.
 - Renew a client certificate from the clients table, with an optional
   validity in days (1–7300). The new profile downloads once and is never
   stored; the old certificate is revoked. New `renew <name> [days]` helper
