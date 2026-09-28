@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # openvpn-panel-helper — the ONLY program the panel may run as root (via sudo).
 #
-# Usage: openvpn-panel-helper <add|revoke|list|status|pki> [name]
+# Usage: openvpn-panel-helper <add|revoke|renew|list|status|pki> [name] [days]
 #
-#   add <name>     create a client; prints the .ovpn profile on stdout
-#   revoke <name>  revoke a client certificate
+#   add <name>           create a client; prints the .ovpn profile on stdout
+#   revoke <name>        revoke a client certificate
+#   renew <name> [days]  re-issue a client certificate (the old one is revoked);
+#                        prints the new .ovpn profile on stdout
 #   list           list client certificates (JSON)
 #   status         list connected clients (JSON)
 #   pki            expiry of the server cert, CA and CRL (JSON, read-only)
@@ -19,6 +21,9 @@ export LC_ALL=C
 
 readonly INSTALLER=/usr/local/sbin/openvpn-install.sh
 readonly NAME_RE='^[A-Za-z0-9_-]{1,32}$'
+# Certificate lifetime: 1-7300 days (src/lib/cert-days.ts).
+readonly DAYS_RE='^[1-9][0-9]{0,3}$'
+readonly DAYS_MAX=7300
 
 die() {
 	echo "openvpn-panel-helper: $*" >&2
@@ -26,20 +31,28 @@ die() {
 }
 
 usage() {
-	die "usage: openvpn-panel-helper <add|revoke|list|status|pki> [name]"
+	die "usage: openvpn-panel-helper <add|revoke|renew|list|status|pki> [name] [days]"
 }
 
 [[ $EUID -eq 0 ]] || die "must run as root"
-[[ $# -ge 1 && $# -le 2 ]] || usage
+[[ $# -ge 1 && $# -le 3 ]] || usage
 
 verb=$1
 name=${2-}
+days=${3-}
 
 case "$verb" in
-add | revoke)
-	[[ $# -eq 2 ]] || usage
+add | revoke | renew)
+	if [[ $verb == renew ]]; then
+		[[ $# -eq 2 || $# -eq 3 ]] || usage
+	else
+		[[ $# -eq 2 ]] || usage
+	fi
 	[[ $name =~ $NAME_RE ]] || die "invalid client name (allowed: 1-32 of A-Z a-z 0-9 _ -)"
 	[[ $name != server_* ]] || die "refusing to modify the server certificate"
+	if [[ -n $days ]]; then
+		[[ $days =~ $DAYS_RE ]] && ((days <= DAYS_MAX)) || die "invalid certificate lifetime (1-$DAYS_MAX days)"
+	fi
 	;;
 list | status | pki)
 	[[ $# -eq 1 ]] || usage
@@ -113,11 +126,16 @@ revoke)
 	# stdout of the installer goes to stderr: our stdout is reserved for data.
 	run_installer client revoke "$name" --force >&2
 	;;
-add)
+add | renew)
 	workdir=$(mktemp -d /tmp/openvpn-panel.XXXXXXXX)
 	trap 'rm -rf -- "$workdir"' EXIT
-	profile=$(mktemp "$workdir/profile.XXXXXXXX")
-	run_installer client add "$name" --output "$profile" >&2
+	profile="$workdir/profile.ovpn"
+	if [[ $verb == add ]]; then
+		run_installer client add "$name" --output "$profile" >&2
+	else
+		# "client renew" has no --output; it honours CLIENT_FILEPATH instead.
+		CLIENT_FILEPATH=$profile run_installer client renew "$name" ${days:+--cert-days "$days"} >&2
+	fi
 	[[ -s $profile ]] || die "installer did not produce a profile"
 	cat -- "$profile"
 	# The trap deletes the profile; it is never kept on disk.

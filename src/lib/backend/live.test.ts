@@ -186,4 +186,19 @@ describe("LiveBackend", () => {
     await expect(backend.getPki()).rejects.toThrow();
     expect(helper.calls).toHaveLength(2);
   });
+
+  it("renews through the helper, returns the new profile and refreshes the certificate list", async () => {
+    const helper = fakeHelper({ list: CLIENT_LIST, renew: "client\ndev tun\n" });
+    const backend = new LiveBackend(fakeMgmt(MGMT_REPLIES), helper);
+    await backend.listClients();
+    expect(await backend.renewClient("alice-laptop", { certDays: 90 })).toContain("client");
+    await backend.listClients();
+    expect(helper.calls.filter(([verb]) => verb === "list")).toHaveLength(2);
+    expect(helper.run).toHaveBeenCalledWith("renew", "alice-laptop", { certDays: 90 });
+  });
+
+  it("rejects renew output that is not a profile", async () => {
+    const backend = new LiveBackend(fakeMgmt(MGMT_REPLIES), fakeHelper({ renew: "oops" }));
+    await expect(backend.renewClient("alice-laptop")).rejects.toThrow(/profile/);
+  });
 });

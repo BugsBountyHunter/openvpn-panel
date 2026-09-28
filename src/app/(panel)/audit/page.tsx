@@ -10,6 +10,7 @@ const LABELS: Record<AuditAction, string> = {
   logout: "Signed out",
   add: "Added client",
   revoke: "Revoked client",
+  renew: "Renewed client",
   disconnect: "Disconnected client",
 };
 

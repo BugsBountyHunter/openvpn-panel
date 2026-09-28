@@ -99,12 +99,34 @@ test("revoke asks for confirmation and hides the client", async ({ page }) => {
   await expect(clientRow(page, "e2e-laptop").getByText("revoked")).toBeVisible();
 });
 
+test("renew re-issues a certificate and downloads the new profile", async ({ page }) => {
+  await signIn(page, "/clients");
+  await expect(clientRow(page, "erin-tablet")).toContainText(/\((11|12)d\)/);
+  await clientRow(page, "erin-tablet").getByRole("button", { name: "Renew" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Renew certificate?" });
+  await expect(dialog).toContainText("old profile stops working");
+  await dialog.getByLabel("Certificate validity (days)").fill("0");
+  await expect(dialog.getByRole("button", { name: "Renew & download" })).toBeDisabled();
+  await dialog.getByLabel("Certificate validity (days)").fill("365");
+
+  const downloadPromise = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Renew & download" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("erin-tablet.ovpn");
+  expect(await readFile(await download.path(), "utf8")).toContain("client");
+
+  await expect(page.getByRole("status")).toContainText('Renewed "erin-tablet"');
+  await expect(clientRow(page, "erin-tablet")).not.toContainText(/\(\d+d\)/);
+});
+
 test("audit log records the actions", async ({ page }) => {
   await signIn(page, "/audit");
   const table = page.getByRole("table");
   await expect(table.getByRole("row").filter({ hasText: "Added client" }).filter({ hasText: "e2e-laptop" })).toBeVisible();
   await expect(table.getByRole("row").filter({ hasText: "Revoked client" }).filter({ hasText: "e2e-laptop" })).toBeVisible();
   await expect(table.getByRole("row").filter({ hasText: "Disconnected client" })).not.toHaveCount(0);
+  await expect(table.getByRole("row").filter({ hasText: "Renewed client" }).filter({ hasText: "erin-tablet" })).toBeVisible();
   await expect(table.getByRole("row").filter({ hasText: "Failed sign-in" })).not.toHaveCount(0);
 });
 

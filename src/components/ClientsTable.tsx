@@ -5,8 +5,9 @@ import { useMemo, useState, useTransition, type FormEvent } from "react";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { CLIENT_NAME_PATTERN } from "@/lib/names";
 import type { VpnClient } from "@/lib/types";
-import { addClientAndDownload, apiPost, UnauthorizedError } from "./api-client";
+import { addClientAndDownload, apiPost, renewClientAndDownload, UnauthorizedError } from "./api-client";
 import { Button, Modal } from "./Modal";
+import { RenewDialog } from "./RenewDialog";
 import { Badge } from "./ui";
 
 interface ClientsTableProps {
@@ -39,6 +40,7 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [pending, setPending] = useState<PendingAction>(null);
+  const [renewing, setRenewing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -83,6 +85,13 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
       setAddOpen(false);
       setNewName("");
     }, `Created "${name}". The profile was downloaded and is not stored on the server.`);
+  }
+
+  async function onRenew(name: string, certDays: number | undefined) {
+    await run(async () => {
+      await renewClientAndDownload(name, certDays);
+      setRenewing(null);
+    }, `Renewed "${name}". The new profile was downloaded; the old one no longer works.`);
   }
 
   async function onConfirm() {
@@ -176,6 +185,11 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
                         </Button>
                       ) : null}
                       {c.status === "active" ? (
+                        <Button variant="ghost" onClick={() => { setError(null); setRenewing(c.name); }}>
+                          Renew
+                        </Button>
+                      ) : null}
+                      {c.status === "active" ? (
                         <Button variant="ghost" onClick={() => { setError(null); setPending({ kind: "revoke", name: c.name }); }}>
                           <span className="text-danger">Revoke</span>
                         </Button>
@@ -217,6 +231,8 @@ export function ClientsTable({ clients, now }: ClientsTableProps) {
           </div>
         </form>
       </Modal>
+
+      <RenewDialog name={renewing} busy={busy} error={error} onClose={() => setRenewing(null)} onRenew={onRenew} />
 
       <Modal
         open={pending !== null}

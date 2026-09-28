@@ -16,6 +16,7 @@ type Routes = {
   logout: typeof import("@/app/api/auth/logout/route");
   clients: typeof import("@/app/api/clients/route");
   revoke: typeof import("@/app/api/clients/[name]/revoke/route");
+  renew: typeof import("@/app/api/clients/[name]/renew/route");
   disconnect: typeof import("@/app/api/clients/[name]/disconnect/route");
   status: typeof import("@/app/api/status/route");
   health: typeof import("@/app/api/health/route");
@@ -41,6 +42,7 @@ beforeAll(async () => {
     logout: await import("@/app/api/auth/logout/route"),
     clients: await import("@/app/api/clients/route"),
     revoke: await import("@/app/api/clients/[name]/revoke/route"),
+    renew: await import("@/app/api/clients/[name]/renew/route"),
     disconnect: await import("@/app/api/clients/[name]/disconnect/route"),
     status: await import("@/app/api/status/route"),
     health: await import("@/app/api/health/route"),
@@ -121,6 +123,29 @@ describe("API", () => {
     expect(log).not.toContain(profile.split("\n")[0]); // profile never logged
     const actions = auditActions().filter((e) => e.target === "laptop-1" || e.target === "bob-phone").map((e) => e.action);
     expect(actions).toEqual(["add", "disconnect", "revoke"]);
+  });
+
+  it("renews a client, streams the new profile and audits it", async () => {
+    const cookie = await login();
+    const res = await r.renew.POST(
+      req("/api/clients/erin-tablet/renew", { method: "POST", body: { certDays: 365 }, cookie }),
+      params("erin-tablet"),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="erin-tablet.ovpn"');
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.text()).toContain("client");
+    expect(auditActions().at(-1)).toMatchObject({ action: "renew", target: "erin-tablet", ok: true });
+
+    const bad = await r.renew.POST(
+      req("/api/clients/erin-tablet/renew", { method: "POST", body: { certDays: 0 }, cookie }),
+      params("erin-tablet"),
+    );
+    expect(bad.status).toBe(400);
+
+    const revoked = await r.renew.POST(req("/x", { method: "POST", body: {}, cookie }), params("dave-old"));
+    expect(revoked.status).toBe(409);
+    expect(auditActions().at(-1)).toMatchObject({ action: "renew", target: "dave-old", ok: false });
   });
 
   it("validates input and protects the server certificate", async () => {

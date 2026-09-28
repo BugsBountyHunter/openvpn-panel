@@ -156,6 +156,9 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
 - Certificate operations go through a tiny root-owned **helper** that accepts
   a fixed set of verbs and a name matching `^[A-Za-z0-9_-]{1,32}$`. The panel
   never runs `openvpn-install.sh` itself, and never uses a shell.
+- **Renew** re-issues a client certificate (`openvpn-install.sh client renew`,
+  optional validity in days) and downloads the new profile once. The old
+  certificate is revoked, so the old profile stops working.
 - The overview warns 30 days before the server certificate, the CA or the CRL
   expires (read-only `pki` helper verb, cached for 10 minutes). An expired CRL
   makes OpenVPN reject every client, so treat that warning as urgent.

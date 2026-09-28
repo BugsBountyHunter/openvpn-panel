@@ -48,6 +48,19 @@ describe("PanelService with the demo backend", () => {
     await expect(panel.revokeClient("nobody")).rejects.toMatchObject({ status: 404 });
   });
 
+  it("renews an active client with a new expiry and returns a profile", async () => {
+    const profile = await panel.renewClient("erin-tablet", { certDays: 365 });
+    expect(profile).toContain("client");
+    const erin = (await panel.listClients()).find((c) => c.name === "erin-tablet");
+    expect(erin?.daysRemaining).toBeGreaterThanOrEqual(364);
+  });
+
+  it("refuses to renew missing, revoked or server certificates", async () => {
+    await expect(panel.renewClient("nobody")).rejects.toMatchObject({ status: 404 });
+    await expect(panel.renewClient("dave-old")).rejects.toMatchObject({ status: 409 });
+    await expect(panel.renewClient("server_a1b2c3d4")).rejects.toMatchObject({ status: 403 });
+  });
+
   it("reports server status", async () => {
     const status = await panel.getStatus();
     expect(status.up).toBe(true);
