@@ -1,14 +1,13 @@
+import { withAuth } from "@/lib/auth/guard";
 import { failFromError, ok } from "@/lib/http";
-import { getPanel } from "@/lib/panel";
+import { loadSnapshot } from "@/lib/panel";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withAuth(async () => {
   try {
-    const panel = getPanel();
-    const [status, clients] = await Promise.all([panel.getStatus(), panel.listClients()]);
-    return ok({ status, clients });
+    return ok(await loadSnapshot());
   } catch (error) {
     return failFromError(error, "Reading status");
   }
-}
+});

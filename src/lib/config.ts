@@ -1,4 +1,3 @@
-import "server-only";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { parseMgmtAddress, type MgmtAddress } from "./mgmt/address";
@@ -34,6 +33,13 @@ const envSchema = z
         code: "custom",
         path: ["OVPN_MGMT"],
         message: (error as Error).message,
+      });
+    }
+    if (env.ADMIN_PASSWORD_HASH && !/^\$(argon2id\$|2[aby]\$)/.test(env.ADMIN_PASSWORD_HASH)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ADMIN_PASSWORD_HASH"],
+        message: 'must be an argon2id or bcrypt hash (npm run hash-password); in .env files escape "$" as "\\$"',
       });
     }
     if (env.PANEL_MODE !== "live") return;

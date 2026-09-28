@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { audit } from "@/lib/audit";
+import { withAuth } from "@/lib/auth/guard";
+import { getConfig } from "@/lib/config";
 import { fail, failFromError, ok } from "@/lib/http";
 import { clientNameSchema } from "@/lib/names";
 import { getPanel } from "@/lib/panel";
@@ -7,24 +10,25 @@ export const dynamic = "force-dynamic";
 
 const addSchema = z.object({ name: clientNameSchema });
 
-export async function GET() {
+export const GET = withAuth(async () => {
   try {
     return ok(await getPanel().listClients());
   } catch (error) {
     return failFromError(error, "Listing clients");
   }
-}
+});
 
 /** Creates a client and streams its profile back. The profile is never stored or logged. */
-export async function POST(request: Request) {
-  const body: unknown = await request.json().catch(() => null);
-  const parsed = addSchema.safeParse(body);
+export const POST = withAuth(async (request, _ctx, { actor, ip }) => {
+  const parsed = addSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail(parsed.error.issues[0]?.message ?? "Invalid request", 400);
   }
   const { name } = parsed.data;
+  const auditPath = getConfig().auditLogPath;
   try {
     const profile = await getPanel().addClient(name);
+    await audit(auditPath, { actor, action: "add", target: name, ip, ok: true });
     return new Response(profile, {
       status: 201,
       headers: {
@@ -35,6 +39,11 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    await audit(auditPath, { actor, action: "add", target: name, ip, ok: false, detail: errorDetail(error) });
     return failFromError(error, "Adding client");
   }
+});
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown error";
 }
