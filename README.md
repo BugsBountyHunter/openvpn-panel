@@ -156,6 +156,10 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
 - Certificate operations go through a tiny root-owned **helper** that accepts
   a fixed set of verbs and a name matching `^[A-Za-z0-9_-]{1,32}$`. The panel
   never runs `openvpn-install.sh` itself, and never uses a shell.
+- **Add client** accepts an optional validity (1–7300 days) and an optional
+  passphrase for the private key. The passphrase goes to the helper on
+  **stdin** (never argv, logs or disk) and reaches `openvpn-install.sh` only
+  through its environment; the audit log records only that one was set.
 - **Renew** re-issues a client certificate (`openvpn-install.sh client renew`,
   optional validity in days) and downloads the new profile once. The old
   certificate is revoked, so the old profile stops working.

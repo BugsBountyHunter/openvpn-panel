@@ -1,7 +1,8 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { isValidCertDays } from "./cert-days";
+import { isValidPassphrase } from "./client-options";
 import { CLIENT_NAME_PATTERN } from "./names";
-import type { CertOptions } from "./types";
+import type { AddOptions } from "./types";
 
 /**
  * Runs the root-owned helper (server/openvpn-panel-helper) through
@@ -12,7 +13,8 @@ import type { CertOptions } from "./types";
 export type HelperVerb = "add" | "revoke" | "renew" | "list" | "status" | "pki";
 
 export interface HelperRunner {
-  run(verb: HelperVerb, name?: string, options?: CertOptions): Promise<string>;
+  /** A passphrase (add only) is written to the helper's stdin, never argv. */
+  run(verb: HelperVerb, name?: string, options?: AddOptions): Promise<string>;
 }
 
 export class HelperError extends Error {
@@ -26,7 +28,7 @@ export class HelperError extends Error {
 }
 
 const NEEDS_NAME: ReadonlySet<HelperVerb> = new Set(["add", "revoke", "renew"]);
-const TAKES_CERT_DAYS: ReadonlySet<HelperVerb> = new Set(["renew"]);
+const TAKES_CERT_DAYS: ReadonlySet<HelperVerb> = new Set(["add", "renew"]);
 const MAX_STDERR = 500;
 
 // Minimal, fixed environment for the privileged call (cast: Next types require NODE_ENV).
@@ -35,14 +37,22 @@ const HELPER_ENV = {
   LANG: "C.UTF-8",
 } as unknown as NodeJS.ProcessEnv;
 
-function optionArgs(verb: HelperVerb, options: CertOptions): string[] {
-  if (options.certDays === undefined) return [];
-  if (!TAKES_CERT_DAYS.has(verb)) throw new HelperError(`"${verb}" takes no certificate lifetime`, null);
-  if (!isValidCertDays(options.certDays)) throw new HelperError("Invalid certificate lifetime", null);
-  return [String(options.certDays)];
+/** Helper argv: `add <name> [days|default] [passphrase]`, `renew <name> [days]`. */
+function optionArgs(verb: HelperVerb, options: AddOptions): string[] {
+  const { certDays, passphrase } = options;
+  if (certDays !== undefined) {
+    if (!TAKES_CERT_DAYS.has(verb)) throw new HelperError(`"${verb}" takes no certificate lifetime`, null);
+    if (!isValidCertDays(certDays)) throw new HelperError("Invalid certificate lifetime", null);
+  }
+  const days = certDays === undefined ? [] : [String(certDays)];
+  if (passphrase === undefined) return days;
+  if (verb !== "add") throw new HelperError(`"${verb}" takes no passphrase`, null);
+  if (!isValidPassphrase(passphrase)) throw new HelperError("Invalid passphrase", null);
+  // Only a marker goes in argv; the passphrase itself is sent on stdin.
+  return [days[0] ?? "default", "passphrase"];
 }
 
-export function buildHelperArgs(helperPath: string, verb: HelperVerb, name?: string, options: CertOptions = {}): string[] {
+export function buildHelperArgs(helperPath: string, verb: HelperVerb, name?: string, options: AddOptions = {}): string[] {
   const extra = optionArgs(verb, options);
   if (NEEDS_NAME.has(verb)) {
     if (!name || !CLIENT_NAME_PATTERN.test(name)) throw new HelperError("Invalid client name", null);
@@ -68,10 +78,11 @@ export class SudoHelperRunner implements HelperRunner {
     private readonly sudoPath: string = "sudo",
   ) {}
 
-  run(verb: HelperVerb, name?: string, options?: CertOptions): Promise<string> {
+  run(verb: HelperVerb, name?: string, options?: AddOptions): Promise<string> {
     const args = buildHelperArgs(this.helperPath, verb, name, options);
+    const input = options?.passphrase === undefined ? "" : `${options.passphrase}\n`;
     return new Promise((resolve, reject) => {
-      execFile(
+      const child = execFile(
         this.sudoPath,
         args,
         {
@@ -91,6 +102,9 @@ export class SudoHelperRunner implements HelperRunner {
           reject(new HelperError(`Helper "${verb}" failed: ${reason}`, code));
         },
       );
+      // Always close stdin so the helper never waits on it; ignore EPIPE if it exited early.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(input);
     });
   }
 }
