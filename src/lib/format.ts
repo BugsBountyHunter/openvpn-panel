@@ -22,6 +22,14 @@ export function formatDuration(ms: number): string {
   return `${minutes}m`;
 }
 
+/** Coarse "time since" label for data freshness. */
+export function formatAge(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 5_000) return "just now";
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  return `${Math.floor(ms / 3_600_000)}h ago`;
+}
+
 export function formatDateTime(epochMs: number): string {
   return new Date(epochMs).toISOString().replace("T", " ").slice(0, 16) + " UTC";
 }

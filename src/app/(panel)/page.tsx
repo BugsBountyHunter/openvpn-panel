@@ -29,10 +29,12 @@ export default async function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <AutoRefresh intervalMs={10_000} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Overview</h1>
-        {status.version ? <span className="text-xs text-muted">{status.version}</span> : null}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          {status.version ? <span className="text-xs text-muted">{status.version}</span> : null}
+          <AutoRefresh intervalMs={10_000} updatedAt={now} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Live view: overview and clients show "Live · updated Xs ago" with a
+  Pause/Resume toggle (remembered per browser), and refresh immediately when
+  the tab becomes visible again.
+
 - Add client: optional certificate validity (1–7300 days) and optional
   passphrase-protected private key. The passphrase is sent to the helper on
   stdin and never appears in argv, logs, the audit log or on disk.
@@ -19,6 +23,12 @@ All notable changes to this project are documented here. The format follows
   the CRL expires (red within 7 days or once expired), with the command to fix
   it. New read-only `pki` helper verb reads the dates with `openssl`; results
   are cached for 10 minutes.
+
+### Changed
+
+- Management-interface reads (`status 3`, state/load-stats/version) are
+  shared for 2 seconds, so several open tabs no longer queue on the
+  single-client management socket. Disconnect, add, renew and revoke clear it.
 
 ## [0.1.0] - 2026-09-29
 
