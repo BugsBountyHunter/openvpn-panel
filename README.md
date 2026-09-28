@@ -154,8 +154,11 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
   `load-stats`, `state`, `kill`). It serves one client at a time, so the
   panel connects per request, serializes access and uses short timeouts.
 - Certificate operations go through a tiny root-owned **helper** that accepts
-  four verbs and a name matching `^[A-Za-z0-9_-]{1,32}$`. The panel never runs
-  `openvpn-install.sh` itself, and never uses a shell.
+  a fixed set of verbs and a name matching `^[A-Za-z0-9_-]{1,32}$`. The panel
+  never runs `openvpn-install.sh` itself, and never uses a shell.
+- The overview warns 30 days before the server certificate, the CA or the CRL
+  expires (read-only `pki` helper verb, cached for 10 minutes). An expired CRL
+  makes OpenVPN reject every client, so treat that warning as urgent.
 - Data sources sit behind a `Backend` interface (`src/lib/types.ts`), so other
   installers can be supported by adding a backend.
 

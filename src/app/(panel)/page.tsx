@@ -1,13 +1,26 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { PkiWarnings } from "@/components/PkiWarnings";
 import { Badge, Card, StatCard } from "@/components/ui";
 import { formatBytes, formatDateTime, formatDuration } from "@/lib/format";
-import { loadSnapshot } from "@/lib/panel";
+import { getPanel, loadSnapshot } from "@/lib/panel";
+import { pkiWarnings, type PkiWarning } from "@/lib/pki";
 
 export const dynamic = "force-dynamic";
 
+/** A failed PKI check must not take the overview down; it is logged and shown as unknown. */
+async function loadPkiWarnings(now: number): Promise<PkiWarning[] | null> {
+  try {
+    return pkiWarnings(await getPanel().getPki(), now);
+  } catch (error) {
+    console.error("[openvpn-panel] PKI check failed:", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 export default async function OverviewPage() {
   const { status, clients, now } = await loadSnapshot();
+  const pki = await loadPkiWarnings(now);
   const online = clients.filter((c) => c.online);
   const active = clients.filter((c) => c.status === "active").length;
   const expiringSoon = clients.filter(
@@ -40,6 +53,12 @@ export default async function OverviewPage() {
           hint={`↓ ${formatBytes(status.bytesIn)} in · ↑ ${formatBytes(status.bytesOut)} out`}
         />
       </div>
+
+      {pki ? (
+        <PkiWarnings warnings={pki} />
+      ) : (
+        <p className="text-xs text-muted">Could not check certificate and CRL expiry. See the panel logs.</p>
+      )}
 
       {expiringSoon > 0 ? (
         <p className="rounded-lg border border-border bg-warn-bg px-4 py-2 text-sm text-warn">

@@ -3,7 +3,7 @@ import { HelperError, type HelperRunner } from "../helper";
 import { MgmtError, type MgmtClient } from "../mgmt/client";
 import { parseKill, parseLoadStats, parseState, parseStatus3, parseVersion, type MgmtClientEntry } from "../mgmt/parse";
 import { CLIENT_NAME_PATTERN } from "../names";
-import type { Backend, ServerStatus, VpnClient } from "../types";
+import type { Backend, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
  * Backend for servers installed with angristan/openvpn-install:
@@ -48,6 +48,35 @@ export function parseCertList(output: string): CertRecord[] {
     expiry: c.expiry && /^\d{4}-\d{2}-\d{2}$/.test(c.expiry) ? c.expiry : null,
     daysRemaining: c.days_remaining ?? null,
   }));
+}
+
+const epochSeconds = z.number().int().positive().nullable();
+const pkiSchema = z.object({
+  server_cert_not_after: epochSeconds,
+  ca_cert_not_after: epochSeconds,
+  crl_next_update: epochSeconds,
+});
+
+const toMs = (seconds: number | null) => (seconds === null ? null : seconds * 1000);
+
+/** Parses `openvpn-panel-helper pki` output (epoch seconds or null). */
+export function parsePki(output: string): PkiStatus {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+  if (start < 0 || end < start) throw new HelperError("Helper returned no PKI status", null);
+  let json: unknown;
+  try {
+    json = JSON.parse(output.slice(start, end + 1));
+  } catch {
+    throw new HelperError("Helper returned malformed JSON", null);
+  }
+  const parsed = pkiSchema.safeParse(json);
+  if (!parsed.success) throw new HelperError("Helper returned an unexpected PKI status", null);
+  return {
+    serverCertExpiresAt: toMs(parsed.data.server_cert_not_after),
+    caCertExpiresAt: toMs(parsed.data.ca_cert_not_after),
+    crlNextUpdate: toMs(parsed.data.crl_next_update),
+  };
 }
 
 function assertName(name: string): void {
@@ -102,12 +131,26 @@ export function mergeClients(certs: CertRecord[], sessions: MgmtClientEntry[]): 
 export class LiveBackend implements Backend {
   readonly kind = "live";
   private certCache: { at: number; value: Promise<CertRecord[]> } | null = null;
+  private pkiCache: { at: number; value: Promise<PkiStatus> } | null = null;
 
   constructor(
     private readonly mgmt: Pick<MgmtClient, "session">,
     private readonly helper: HelperRunner,
     private readonly certCacheMs: number = 15_000,
+    private readonly pkiCacheMs: number = 10 * 60_000,
   ) {}
+
+  /** Dates change only on renew/revoke, so a long cache keeps sudo calls rare. */
+  getPki(): Promise<PkiStatus> {
+    const now = Date.now();
+    if (this.pkiCache && now - this.pkiCache.at < this.pkiCacheMs) return this.pkiCache.value;
+    const value = this.helper.run("pki").then(parsePki);
+    this.pkiCache = { at: now, value };
+    value.catch(() => {
+      if (this.pkiCache?.value === value) this.pkiCache = null;
+    });
+    return value;
+  }
 
   private listCerts(): Promise<CertRecord[]> {
     const now = Date.now();
@@ -122,6 +165,8 @@ export class LiveBackend implements Backend {
 
   private invalidateCerts(): void {
     this.certCache = null;
+    // Revoking regenerates the CRL, so its date may have moved too.
+    this.pkiCache = null;
   }
 
   async getStatus(): Promise<ServerStatus> {

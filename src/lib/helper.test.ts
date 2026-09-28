@@ -8,12 +8,14 @@ describe("buildHelperArgs", () => {
   it("builds argv for sudo without a shell", () => {
     expect(buildHelperArgs("/usr/local/sbin/h", "add", "alice")).toEqual(["-n", "--", "/usr/local/sbin/h", "add", "alice"]);
     expect(buildHelperArgs("/usr/local/sbin/h", "list")).toEqual(["-n", "--", "/usr/local/sbin/h", "list"]);
+    expect(buildHelperArgs("/usr/local/sbin/h", "pki")).toEqual(["-n", "--", "/usr/local/sbin/h", "pki"]);
   });
 
   it("rejects bad or missing names", () => {
     expect(() => buildHelperArgs("/h", "add")).toThrow(HelperError);
     expect(() => buildHelperArgs("/h", "revoke", "$(reboot)")).toThrow(HelperError);
     expect(() => buildHelperArgs("/h", "list", "extra")).toThrow(HelperError);
+    expect(() => buildHelperArgs("/h", "pki", "extra")).toThrow(HelperError);
   });
 });
 
