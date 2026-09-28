@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# openvpn-panel-deploy — install a release tarball read from stdin.
+#
+#   ssh openvpn-panel-deploy@host < release.tar.gz        (CI, forced command)
+#   sudo openvpn-panel-deploy < release.tar.gz             (manual)
+#
+# Extracts to /opt/openvpn-panel/releases/<timestamp>, atomically flips the
+# "current" symlink, restarts the service, checks /api/health, rolls back on
+# failure, and keeps the last 3 releases. Installed root:root 0755 in
+# /usr/local/sbin by server/install.sh.
+set -euo pipefail
+umask 022
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+readonly BASE=/opt/openvpn-panel
+readonly RELEASES=$BASE/releases
+readonly CURRENT=$BASE/current
+readonly SERVICE=openvpn-panel.service
+readonly ENV_FILE=/etc/openvpn-panel/env
+readonly KEEP=3
+readonly MAX_BYTES=$((300 * 1024 * 1024))
+readonly HEALTH_TRIES=30
+
+log() { echo "deploy: $*" >&2; }
+die() {
+	echo "deploy: error: $*" >&2
+	exit 1
+}
+
+[[ $EUID -eq 0 ]] || die "must run as root"
+[[ $# -eq 0 ]] || die "takes no arguments; pipe a release tarball on stdin"
+[[ ! -t 0 ]] || die "pipe a release tarball on stdin"
+[[ -d $RELEASES ]] || die "$RELEASES missing; run server/install.sh first"
+
+exec 9>/run/openvpn-panel-deploy.lock
+flock -n 9 || die "another deploy is in progress"
+
+incoming=$(mktemp -d "$RELEASES/.incoming.XXXXXX")
+cleanup() { rm -rf -- "$incoming"; }
+trap cleanup EXIT
+
+# 1. Receive (bounded size).
+head -c $((MAX_BYTES + 1)) >"$incoming/release.tar.gz"
+size=$(stat -c %s "$incoming/release.tar.gz")
+((size > 0)) || die "empty upload"
+((size <= MAX_BYTES)) || die "release larger than $MAX_BYTES bytes"
+gzip -t "$incoming/release.tar.gz" 2>/dev/null || die "upload is not a valid gzip file"
+
+# 2. Validate: only regular files and directories, no absolute or ".." paths.
+while IFS= read -r line; do
+	type=${line:0:1}
+	[[ $type == "-" || $type == "d" ]] || die "release contains a non-regular entry: $line"
+done < <(tar -tvzf "$incoming/release.tar.gz")
+while IFS= read -r entry; do
+	case "$entry" in
+	/* | .. | ../* | */../* | */..) die "unsafe path in release: $entry" ;;
+	esac
+done < <(tar -tzf "$incoming/release.tar.gz")
+
+# 3. Extract.
+mkdir "$incoming/app"
+tar -xzf "$incoming/release.tar.gz" -C "$incoming/app" --no-same-owner --no-same-permissions
+[[ -f $incoming/app/server.js && -f $incoming/app/start.mjs ]] || die "release is missing server.js or start.mjs"
+chown -R root:root "$incoming/app"
+chmod -R u+rwX,go+rX,go-w "$incoming/app"
+
+release=$RELEASES/$(date -u +%Y%m%d%H%M%S)
+[[ ! -e $release ]] || release=$release-$$
+mv "$incoming/app" "$release"
+log "extracted to $release"
+
+previous=$(readlink -f "$CURRENT" 2>/dev/null || true)
+
+flip() {
+	ln -sfn "$1" "$CURRENT.new"
+	mv -Tf "$CURRENT.new" "$CURRENT"
+}
+
+env_value() {
+	sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -n1 | tr -d "'\""
+}
+
+health_url() {
+	local host port
+	host=$(env_value PANEL_HOST)
+	port=$(env_value PANEL_PORT)
+	host=${host:-127.0.0.1}
+	port=${port:-8081}
+	[[ $host == *:* ]] && host="[$host]"
+	echo "http://$host:$port/api/health"
+}
+
+healthy() {
+	local url i
+	url=$(health_url)
+	for ((i = 1; i <= HEALTH_TRIES; i++)); do
+		if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 1
+	done
+	return 1
+}
+
+# 4. Activate and verify.
+flip "$release"
+systemctl restart "$SERVICE" 9>&-
+if healthy; then
+	log "health check passed ($(health_url))"
+else
+	log "health check FAILED; recent logs:"
+	journalctl -u "$SERVICE" -n 30 --no-pager >&2 || true
+	if [[ -n $previous && -d $previous ]]; then
+		flip "$previous"
+		systemctl restart "$SERVICE" 9>&- || true
+		log "rolled back to $previous"
+	fi
+	rm -rf -- "$release"
+	die "deploy failed"
+fi
+
+# 5. Keep the newest $KEEP releases (never the active one).
+active=$(readlink -f "$CURRENT")
+mapfile -t all < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+for ((i = KEEP; i < ${#all[@]}; i++)); do
+	[[ ${all[i]} == "$active" ]] && continue
+	rm -rf -- "${all[i]}"
+	log "removed old release ${all[i]}"
+done
+
+log "deployed $(basename "$release")"

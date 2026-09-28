@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# openvpn-panel-helper — the ONLY program the panel may run as root (via sudo).
+#
+# Usage: openvpn-panel-helper <add|revoke|list|status> [name]
+#
+#   add <name>     create a client; prints the .ovpn profile on stdout
+#   revoke <name>  revoke a client certificate
+#   list           list client certificates (JSON)
+#   status         list connected clients (JSON)
+#
+# Installed root:root 0755 at /usr/local/sbin/openvpn-panel-helper by
+# server/install.sh. It wraps angristan/openvpn-install and never accepts
+# anything but the four verbs above and a strictly validated client name.
+set -euo pipefail
+umask 077
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+readonly INSTALLER=/usr/local/sbin/openvpn-install.sh
+readonly NAME_RE='^[A-Za-z0-9_-]{1,32}$'
+
+die() {
+	echo "openvpn-panel-helper: $*" >&2
+	exit 2
+}
+
+usage() {
+	die "usage: openvpn-panel-helper <add|revoke|list|status> [name]"
+}
+
+[[ $EUID -eq 0 ]] || die "must run as root"
+[[ $# -ge 1 && $# -le 2 ]] || usage
+
+verb=$1
+name=${2-}
+
+case "$verb" in
+add | revoke)
+	[[ $# -eq 2 ]] || usage
+	[[ $name =~ $NAME_RE ]] || die "invalid client name (allowed: 1-32 of A-Z a-z 0-9 _ -)"
+	[[ $name != server_* ]] || die "refusing to modify the server certificate"
+	;;
+list | status)
+	[[ $# -eq 1 ]] || usage
+	;;
+*)
+	usage
+	;;
+esac
+
+[[ -f $INSTALLER ]] || die "$INSTALLER not found; re-run server/install.sh"
+
+run_installer() {
+	# JSON output suppresses log noise; no log file; never read from stdin.
+	OUTPUT_FORMAT=json bash "$INSTALLER" --no-log --no-color "$@" </dev/null
+}
+
+case "$verb" in
+list)
+	run_installer client list --format json
+	;;
+status)
+	run_installer server status --format json
+	;;
+revoke)
+	# stdout of the installer goes to stderr: our stdout is reserved for data.
+	run_installer client revoke "$name" --force >&2
+	;;
+add)
+	workdir=$(mktemp -d /tmp/openvpn-panel.XXXXXXXX)
+	trap 'rm -rf -- "$workdir"' EXIT
+	profile=$(mktemp "$workdir/profile.XXXXXXXX")
+	run_installer client add "$name" --output "$profile" >&2
+	[[ -s $profile ]] || die "installer did not produce a profile"
+	cat -- "$profile"
+	# The trap deletes the profile; it is never kept on disk.
+	;;
+esac

@@ -1,0 +1,34 @@
+# Installed by openvpn-panel server/install.sh
+[Unit]
+Description=openvpn-panel web dashboard
+After=network-online.target openvpn-panel-mgmt.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openvpn-panel
+Group=openvpn-panel
+EnvironmentFile=/etc/openvpn-panel/env
+WorkingDirectory=/opt/openvpn-panel/current
+ExecStart=/usr/bin/env node /opt/openvpn-panel/current/start.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+# --- Hardening -------------------------------------------------------------
+# The panel calls `sudo -n /usr/local/sbin/openvpn-panel-helper`, so
+# NoNewPrivileges= must stay off. Settings that silently imply it must stay
+# off too: SystemCallFilter, SystemCallArchitectures, RestrictAddressFamilies,
+# RestrictNamespaces, RestrictSUIDSGID, RestrictRealtime, PrivateDevices,
+# ProtectKernelTunables, ProtectKernelModules, ProtectKernelLogs, ProtectClock,
+# MemoryDenyWriteExecute, LockPersonality, DynamicUser.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# The helper runs as root *inside this sandbox*, so every path that
+# openvpn-install.sh (and sudo) writes must be listed here as well.
+ReadWritePaths=/var/lib/openvpn-panel
+ReadWritePaths=-/etc/openvpn -/var/log/openvpn -/run/openvpn-server -/run/sudo -/var/lib/sudo -/var/db/sudo
+
+[Install]
+WantedBy=multi-user.target
