@@ -36,6 +36,20 @@ test("overview warns before the CRL expires", async ({ page }) => {
   await expect(warning).toContainText("easyrsa gen-crl");
 });
 
+test("live view shows freshness and can be paused", async ({ page }) => {
+  await signIn(page, "/clients");
+  await expect(page.getByText(/Live · updated (just now|\d+s ago)/)).toBeVisible();
+  const toggle = page.getByRole("button", { name: "Pause" });
+  await toggle.click();
+  await expect(page.getByText(/Paused · updated/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.reload();
+  await expect(page.getByText(/Paused · updated/)).toBeVisible();
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByText(/Live · updated/)).toBeVisible();
+});
+
 test("the server certificate is never listed", async ({ page }) => {
   await signIn(page, "/clients");
   await page.getByLabel("Filter by status").selectOption("all");

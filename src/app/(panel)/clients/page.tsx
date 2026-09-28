@@ -10,8 +10,10 @@ export default async function ClientsPage() {
   const online = clients.filter((c) => c.online).length;
   return (
     <div className="space-y-6">
-      <AutoRefresh />
-      <h1 className="text-xl font-semibold">Clients</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">Clients</h1>
+        <AutoRefresh updatedAt={now} />
+      </div>
       <Card title={`${clients.length} certificates · ${online} online`}>
         <ClientsTable clients={clients} now={now} />
       </Card>
