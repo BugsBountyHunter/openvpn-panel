@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Release staging from scripts/package-release.sh.
     "release/**",
+    "coverage/**",
   ]),
 ]);
 
