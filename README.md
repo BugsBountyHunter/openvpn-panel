@@ -1,5 +1,8 @@
 # openvpn-panel
 
+[![CI](https://github.com/BugsBountyHunter/openvpn-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/BugsBountyHunter/openvpn-panel/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A small, self-hosted web dashboard for OpenVPN servers installed with
 [angristan/openvpn-install](https://github.com/angristan/openvpn-install).
 
@@ -68,6 +71,9 @@ Details and known trade-offs: [SECURITY.md](SECURITY.md).
   [openvpn-install.sh](https://github.com/angristan/openvpn-install) (with the
   `client` CLI and `OUTPUT_FORMAT=json`), systemd, `sudo`, `socat`, `curl`.
 - **Node.js ≥ 24.7** on the server (uses `crypto.argon2`).
+
+Tested on Ubuntu 24.04 with OpenVPN 2.7.7 (management interface v6), plus
+recorded output from OpenVPN 2.5 and 2.6.
 
 ## Try it locally (demo mode)
 
@@ -155,6 +161,10 @@ failure (keeping the last 3 releases).
    - `DEPLOY_KNOWN_HOSTS` — output of `ssh-keyscan -t ed25519 <host>`
      (verify the fingerprint out of band)
    - optional repository *variable* `DEPLOY_SSH_PORT` (default 22)
+
+Add them as *repository* secrets. The deploy job runs in a `production`
+environment: add required reviewers there if every deploy should need a manual
+approval.
 
 Without these secrets (e.g. in forks) the deploy job is skipped, not failed.
 

@@ -1,0 +1,6 @@
+# Security-sensitive paths need an owner review.
+*                 @BugsBountyHunter
+/server/          @BugsBountyHunter
+/src/lib/auth/    @BugsBountyHunter
+/src/proxy.ts     @BugsBountyHunter
+/.github/         @BugsBountyHunter

@@ -35,5 +35,21 @@
   "license": "MIT",
   "engines": {
     "node": ">=24.7"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BugsBountyHunter/openvpn-panel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BugsBountyHunter/openvpn-panel/issues"
+  },
+  "homepage": "https://github.com/BugsBountyHunter/openvpn-panel#readme",
+  "keywords": [
+    "openvpn",
+    "vpn",
+    "dashboard",
+    "openvpn-install",
+    "nextjs",
+    "self-hosted"
+  ]
 }

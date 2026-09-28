@@ -57,7 +57,11 @@ reachable only by the administrator, ideally only over the VPN itself.
 
 ### Management interface
 
-The OpenVPN management socket is root-owned. `openvpn-panel-mgmt.service`
+The OpenVPN management socket is owned by root. Note that OpenVPN creates it
+with your umask; on stock openvpn-install servers it is often `srwxrwxrwx`, i.e.
+already usable by every local user. Consider tightening it (for example with
+`management-client-user`/`-group` or a restrictive `UMask=` for the OpenVPN
+unit). `openvpn-panel-mgmt.service`
 bridges it with socat:
 
 - `--mgmt-bridge tcp` (default): listens on `127.0.0.1:7505`. **Any local user
