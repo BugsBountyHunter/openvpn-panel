@@ -84,7 +84,7 @@ default whenever `PANEL_MODE` is not `live`.
 1. Install Node.js ≥ 24.7, then clone this repository on the server:
 
    ```bash
-   git clone https://github.com/<you>/openvpn-panel.git && cd openvpn-panel
+   git clone https://github.com/BugsBountyHunter/openvpn-panel.git && cd openvpn-panel
    ```
 
 2. Run the installer (prompts for the admin password; only its hash is stored):
