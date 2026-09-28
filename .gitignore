@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+!.env.example
+
+# panel runtime data (audit log in dev)
+/data/
+/release/
+*.tar.gz
