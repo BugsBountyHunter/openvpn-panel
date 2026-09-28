@@ -5,9 +5,17 @@ updates:
     schedule:
       interval: monthly
     groups:
-      dependencies:
-        patterns: ["*"]
+      # Minor/patch updates land together; majors arrive as separate PRs.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # typescript-eslint lags new TypeScript majors; bump TS manually.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
