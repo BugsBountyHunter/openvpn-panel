@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Removes openvpn-panel from this server. OpenVPN itself is not touched.
 #
-#   sudo ./server/uninstall.sh           keep config (/etc/openvpn-panel) and audit log
-#   sudo ./server/uninstall.sh --purge   remove those too
+#   sudo openvpn-panel-uninstall           keep config (/etc/openvpn-panel) and audit log
+#   sudo openvpn-panel-uninstall --purge   remove those too
 set -euo pipefail
 
 purge=false
@@ -20,6 +20,7 @@ log "services removed"
 
 rm -f /etc/sudoers.d/openvpn-panel
 rm -f /usr/local/sbin/openvpn-panel-helper /usr/local/sbin/openvpn-panel-deploy
+rm -f /usr/local/sbin/openvpn-panel-update /usr/local/sbin/openvpn-panel-uninstall
 # Our root-only copy; the original openvpn-install.sh you downloaded is untouched.
 rm -f /usr/local/sbin/openvpn-install.sh
 rm -rf /opt/openvpn-panel

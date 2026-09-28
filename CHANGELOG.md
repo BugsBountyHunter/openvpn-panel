@@ -4,20 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-09-29
 
-### Fixed
-
-- Login redirects kept `127.0.0.1` from being rewritten to `localhost`, which
-  lost the session when using an SSH tunnel.
-- Dialogs had duplicate `id`s, so screen readers announced the wrong title.
-
-### Added
-
-- Integration tests for all API routes and the proxy; Playwright E2E suite
-  (desktop and mobile); CI coverage thresholds.
-
-## [0.1.0] - 2026-09-28
+First public release.
 
 ### Added
 
@@ -27,11 +16,18 @@ All notable changes to this project are documented here. The format follows
   root-owned sudo helper for add/revoke/list/status.
 - Single-admin login (argon2id or bcrypt), signed session cookie, login rate
   limiting, CSRF protection, append-only JSON-lines audit log.
-- `server/install.sh`, `uninstall.sh`, `openvpn-panel-helper`,
-  `openvpn-panel-deploy` and a hardened systemd unit.
-- CI (lint, typecheck, tests, build, ShellCheck) and SSH deploy workflows.
+- One-command install from GitHub releases with SHA-256 verification;
+  `openvpn-panel-update` (keeps settings, health-checked with automatic
+  rollback) and `openvpn-panel-uninstall`.
+- Release workflow publishing `openvpn-panel.tar.gz`, `install.sh` and
+  `SHA256SUMS` with build-provenance attestations.
+- Hardened systemd unit, visudo-validated sudoers rule, management-socket
+  bridge (0600 unix socket by default).
+- Tests: unit, API integration, Playwright E2E (desktop and mobile), and an
+  install/update/uninstall test in a clean Debian container; CI coverage
+  thresholds; optional SSH deploy workflow for maintainers.
 
-Tested against OpenVPN 2.5/2.6 recorded output and a live OpenVPN 2.7.7
-server on Ubuntu 24.04.
+Tested against a live OpenVPN 2.7.7 server on Ubuntu 24.04 and recorded
+output from OpenVPN 2.5 and 2.6.
 
 [0.1.0]: https://github.com/BugsBountyHunter/openvpn-panel/releases/tag/v0.1.0

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Packages the Next.js standalone build into release.tar.gz for
-# server/openvpn-panel-deploy. Run after `npm run build`.
+# Packages a release bundle: the Next.js standalone build plus the server
+# scripts, so one tarball is enough to install or update a server.
+# Run after `npm run build`. RELEASE_VERSION overrides the version label.
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -16,6 +17,13 @@ cp -R "$standalone/." "$stage/"
 cp -R "$root/.next/static" "$stage/.next/static"
 [[ -d $root/public ]] && cp -R "$root/public" "$stage/public"
 cp "$root/scripts/start.mjs" "$stage/start.mjs"
+# Server-side installer, helper and units travel with the app.
+mkdir -p "$stage/scripts"
+cp -R "$root/server" "$stage/server"
+cp "$root/scripts/hash-password.mjs" "$stage/scripts/hash-password.mjs"
+cp "$root/LICENSE" "$stage/LICENSE"
+version=${RELEASE_VERSION:-v$(node -p "require('$root/package.json').version")}
+printf '%s\n' "$version" >"$stage/VERSION"
 # Never ship local env files or dev data.
 rm -rf "$stage"/.env* "$stage/data"
 

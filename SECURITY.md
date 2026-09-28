@@ -64,11 +64,11 @@ already usable by every local user. Consider tightening it (for example with
 unit). `openvpn-panel-mgmt.service`
 bridges it with socat:
 
-- `--mgmt-bridge tcp` (default): listens on `127.0.0.1:7505`. **Any local user
-  on the server can connect** and issue management commands (for example
-  disconnect clients or stop OpenVPN). Fine for single-purpose VPN hosts.
-- `--mgmt-bridge unix`: listens on a `0600` unix socket owned by the panel
-  user. Recommended on shared hosts.
+- `--mgmt-bridge unix` (default): listens on a `0600` unix socket owned by the
+  panel user.
+- `--mgmt-bridge tcp`: listens on `127.0.0.1:7505`. **Any local user on the
+  server can connect** and issue management commands (for example disconnect
+  clients or stop OpenVPN).
 
 ### Audit log
 
@@ -76,6 +76,17 @@ Append-only JSON lines at `/var/lib/openvpn-panel/audit.log`, writable only by
 the panel user. Control characters in logged values are neutralised so entries
 cannot be forged. It is not tamper-proof against root; ship it to a remote log
 store if that matters to you.
+
+### Releases and updates
+
+`install.sh` and `openvpn-panel-update` download `openvpn-panel.tar.gz` and
+`SHA256SUMS` over HTTPS from the project's GitHub releases and refuse to
+install if the checksum does not match. Releases are built by GitHub Actions
+from a tag and carry build-provenance attestations
+(`gh attestation verify <file> -R BugsBountyHunter/openvpn-panel`). The
+checksum file comes from the same place as the tarball, so it guards against
+corruption, not a compromised release; verify the attestation if that matters
+to you.
 
 ### CI deploys
 
