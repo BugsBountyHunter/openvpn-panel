@@ -45,3 +45,8 @@ next-env.d.ts
 /data/
 /release/
 *.tar.gz
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/

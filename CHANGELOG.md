@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Login redirects kept `127.0.0.1` from being rewritten to `localhost`, which
+  lost the session when using an SSH tunnel.
+- Dialogs had duplicate `id`s, so screen readers announced the wrong title.
+
+### Added
+
+- Integration tests for all API routes and the proxy; Playwright E2E suite
+  (desktop and mobile); CI coverage thresholds.
+
 ## [0.1.0] - 2026-09-28
 
 ### Added

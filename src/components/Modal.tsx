@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 interface ModalProps {
   open: boolean;
@@ -12,6 +12,7 @@ interface ModalProps {
 /** Accessible modal built on the native <dialog> element. */
 export function Modal({ open, title, onClose, children }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -24,11 +25,11 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
     <dialog
       ref={ref}
       onClose={onClose}
-      aria-labelledby="modal-title"
+      aria-labelledby={titleId}
       className="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-0 text-text shadow-xl"
     >
       <div className="p-5">
-        <h2 id="modal-title" className="text-base font-semibold">
+        <h2 id={titleId} className="text-base font-semibold">
           {title}
         </h2>
         <div className="mt-3">{children}</div>

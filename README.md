@@ -70,7 +70,15 @@ Details and known trade-offs: [SECURITY.md](SECURITY.md).
 - A Linux server set up with a recent
   [openvpn-install.sh](https://github.com/angristan/openvpn-install) (with the
   `client` CLI and `OUTPUT_FORMAT=json`), systemd, `sudo`, `socat`, `curl`.
-- **Node.js ≥ 24.7** on the server (uses `crypto.argon2`).
+- **Node.js ≥ 24.7** on the server (uses `crypto.argon2`), installed at a
+  system path such as `/usr/local/bin/node` or `/usr/bin/node`. A Node from
+  `nvm` in your home directory is not visible to the service (the systemd
+  sandbox hides `/home`) — copy the binary or use your distro/NodeSource
+  package:
+
+  ```bash
+  sudo install -m 0755 "$(command -v node)" /usr/local/bin/node
+  ```
 
 Tested on Ubuntu 24.04 with OpenVPN 2.7.7 (management interface v6), plus
 recorded output from OpenVPN 2.5 and 2.6.
@@ -126,6 +134,20 @@ default whenever `PANEL_MODE` is not `live`.
 | `/opt/openvpn-panel/releases/*`, `current` | deployed releases |
 | `openvpn-panel.service` | the panel |
 | `openvpn-panel-mgmt.service` | socat bridge to the management socket |
+
+## Deployment options
+
+The panel runs natively under systemd next to OpenVPN. That is deliberate:
+
+| Approach | Verdict |
+| --- | --- |
+| **Native systemd service** (this project) | ✅ Unprivileged user, read-only sandbox, `sudo` limited to one small helper. Matches a native openvpn-install server. |
+| Panel in Docker + host helper over a socket | Possible, but adds a root daemon for the container to call — more moving parts for the same result. |
+| Docker with `--privileged` / `/etc/openvpn` mounted | ❌ Equivalent to root on the host; defeats the privilege separation. |
+| OpenVPN and panel both in containers | Only sensible for new servers; migrating means reissuing every client profile. |
+
+Demo mode has no privileged parts, so it is fine to run anywhere, including a
+container.
 
 ## Configuration
 
@@ -189,12 +211,26 @@ OpenVPN and your clients are not affected.
 ## Development
 
 ```bash
-npm run dev         # demo mode on 127.0.0.1:8081
-npm test            # vitest
+npm run dev            # demo mode on 127.0.0.1:8081 (admin / demo)
+npm test               # unit + integration tests (vitest)
+npm run test:coverage  # same, enforcing coverage thresholds
+npm run build          # standalone output in .next/standalone
+npm run test:e2e       # Playwright against the production build (run build first)
 npm run lint
 npm run typecheck
-npm run build       # standalone output in .next/standalone
 ```
+
+### Testing strategy
+
+| Layer | What it covers |
+| --- | --- |
+| Unit | parsers (recorded `status 3` from OpenVPN 2.5/2.6/2.7), management client against a fake server, sessions, password hashing, rate limiting, audit log, helper runner |
+| Integration | every API route and the proxy: login, CSRF, add → disconnect → revoke lifecycle, audit entries, `server_*` protection |
+| E2E | Playwright on the production build: login, add/download, confirmations, audit page, sign-out, security headers, no horizontal scroll on mobile |
+| Server scripts | ShellCheck in CI; helper/deploy smoke-tested in a Debian container |
+
+CI runs all of the above on every push and pull request; line coverage must
+stay above 80 %.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 

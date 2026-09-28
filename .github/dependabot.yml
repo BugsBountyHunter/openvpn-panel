@@ -12,6 +12,12 @@ updates:
       # typescript-eslint lags new TypeScript majors; bump TS manually.
       - dependency-name: typescript
         update-types: [version-update:semver-major]
+      # Keep @types/node on the Node major we run (see .nvmrc).
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      # eslint majors wait for eslint-config-next support.
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:

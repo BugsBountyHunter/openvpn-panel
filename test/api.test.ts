@@ -152,7 +152,7 @@ describe("proxy", () => {
   it("redirects anonymous page views to /login with next", () => {
     const res = r.proxy.proxy(req("/clients", { origin: null }));
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("/login?next=%2Fclients");
+    expect(res.headers.get("location")).toBe(`${ORIGIN}/login?next=%2Fclients`);
   });
 
   it("returns 401 JSON for anonymous API calls and allows public paths", async () => {
@@ -167,6 +167,6 @@ describe("proxy", () => {
   it("sends signed-in users away from /login", async () => {
     const cookie = await login();
     const res = r.proxy.proxy(req("/login", { cookie, origin: null }));
-    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("location")).toBe(`${ORIGIN}/`);
   });
 });

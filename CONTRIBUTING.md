@@ -15,10 +15,11 @@ Requires Node.js ≥ 24.7. No OpenVPN server is needed: `PANEL_MODE=demo`
 ## Before opening a PR
 
 ```bash
-npm run lint && npm run typecheck && npm test && npm run build
+npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run test:e2e
 shellcheck server/*.sh server/openvpn-panel-helper server/openvpn-panel-deploy scripts/*.sh
 ```
 
+- Work on a branch and open a pull request; `main` requires passing CI.
 - Add tests for new behaviour (`*.test.ts` next to the code; fixtures in
   `test/fixtures/`). Parser changes should come with recorded output from a
   real server — replace real IPs and names with documentation ranges

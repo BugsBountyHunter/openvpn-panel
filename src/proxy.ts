@@ -2,12 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isMutation, isSameOriginRequest, sessionFromHeaders } from "./lib/auth/request";
 
 /**
- * Relative redirect: stays on whatever host the admin used. Next normalizes
- * 127.0.0.1 to "localhost" in absolute URLs, which would drop the session
- * cookie for anyone reaching the panel through an SSH tunnel.
+ * Redirects to a path on the same host the admin used. Next normalizes
+ * 127.0.0.1 to "localhost" in request.url, which would drop the session cookie
+ * for anyone reaching the panel through an SSH tunnel, so the Host header is
+ * used instead (it only ever redirects the requester back to itself).
  */
-function redirectTo(location: string): NextResponse {
-  return new NextResponse(null, { status: 307, headers: { Location: location } });
+const HOST_PATTERN = /^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?$/;
+
+function redirectTo(request: NextRequest, path: string): NextResponse {
+  const host = request.headers.get("host");
+  const base = host && HOST_PATTERN.test(host) ? `${request.nextUrl.protocol}//${host}` : request.url;
+  return NextResponse.redirect(new URL(path, base), 307);
 }
 
 /** Reachable without a session. */
@@ -25,7 +30,7 @@ export function proxy(request: NextRequest) {
 
   if (PUBLIC_PATHS.has(pathname)) {
     if (pathname === "/login" && signedIn) {
-      return redirectTo("/");
+      return redirectTo(request, "/");
     }
     return NextResponse.next();
   }
@@ -36,7 +41,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.json({ success: false, data: null, error: "Not signed in" }, { status: 401 });
   }
   const next = pathname === "/" ? "" : `?${new URLSearchParams({ next: `${pathname}${search}` })}`;
-  return redirectTo(`/login${next}`);
+  return redirectTo(request, `/login${next}`);
 }
 
 export const config = {
