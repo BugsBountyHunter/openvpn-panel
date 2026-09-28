@@ -1,0 +1,6 @@
+{"clients":[
+{"name":"alice-laptop","status":"valid","expiry":"2036-02-09","days_remaining":3421}
+,{"name":"bob-phone","status":"valid","expiry":"2035-10-13","days_remaining":3302}
+,{"name":"dave-old","status":"revoked","expiry":"2029-01-01","days_remaining":1191}
+,{"name":"erin-tablet","status":"valid","expiry":"unknown","days_remaining":null}
+]}
