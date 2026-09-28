@@ -27,7 +27,7 @@ describe("SudoHelperRunner", () => {
     // Stand-in for sudo: echoes argv one per line, or fails on "revoke".
     writeFileSync(
       fakeSudo,
-      '#!/bin/sh\nif [ "$4" = revoke ]; then echo "\\033[31mError: no such client\\033[0m" >&2; echo SECRET-STDOUT; exit 3; fi\nfor a in "$@"; do echo "$a"; done\n',
+      '#!/bin/sh\nif [ "$4" = revoke ]; then echo "\\033[31mError: no such client\\033[0m" >&2; echo SECRET-STDOUT; exit 3; fi\nprintf \'%s\\n\' "$@"\n',
     );
     chmodSync(fakeSudo, 0o755);
   });
