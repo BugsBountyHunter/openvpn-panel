@@ -1,36 +1,193 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# openvpn-panel
 
-## Getting Started
+A small, self-hosted web dashboard for OpenVPN servers installed with
+[angristan/openvpn-install](https://github.com/angristan/openvpn-install).
 
-First, run the development server:
+See who is connected, add clients (the `.ovpn` downloads straight to your
+browser and is never stored), revoke or disconnect them, and keep an audit
+trail — without handing a web app root access.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+![Clients page in demo mode](docs/screenshot-clients.png)
+
+## Features
+
+- **Overview** — OpenVPN up/down, uptime, connected clients, total traffic,
+  certificates expiring soon.
+- **Clients** — name, active/revoked, certificate expiry, online now, real IP,
+  VPN IP, bytes in/out, connected since. Add (profile download), Revoke (with
+  confirmation) and Disconnect. The server's own `server_*` certificate is
+  hidden and cannot be touched.
+- **Audit log** — who did what, when and from where: sign-in, add, revoke,
+  disconnect (append-only JSON lines).
+- **Single admin** login with an argon2id or bcrypt hash, rate limiting and
+  CSRF protection.
+- **Demo mode** with fake data for local development, screenshots and tests.
+- `GET /api/health` for deploy checks.
+
+## How it works
+
+```
+browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sandboxed)
+                                   │                    │
+               status / kill       │                    │  sudo -n (only this program)
+                                   ▼                    ▼
+       socat bridge ─▶ OpenVPN management socket   /usr/local/sbin/openvpn-panel-helper
+       (127.0.0.1:7505 or 0600 unix socket)             │  add | revoke | list | status
+                                                        ▼
+                                           openvpn-install.sh client … (root)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- Live data comes from the OpenVPN **management interface** (`status 3`,
+  `load-stats`, `state`, `kill`). It serves one client at a time, so the
+  panel connects per request, serializes access and uses short timeouts.
+- Certificate operations go through a tiny root-owned **helper** that accepts
+  four verbs and a name matching `^[A-Za-z0-9_-]{1,32}$`. The panel never runs
+  `openvpn-install.sh` itself, and never uses a shell.
+- Data sources sit behind a `Backend` interface (`src/lib/types.ts`), so other
+  installers can be supported by adding a backend.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Security model
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Binds to `127.0.0.1` by default. Use the server's VPN IP (e.g. `10.8.0.1`)
+  to reach it over the VPN only; never expose it publicly.
+- The panel runs as an unprivileged system user in a hardened systemd unit.
+  Its only privilege is `sudo` for the helper (validated with `visudo -c`).
+- Profiles are streamed to the browser and deleted from disk immediately; they
+  are never logged or stored by the panel.
+- Sessions: HMAC-signed, `httpOnly`, `SameSite=Strict` cookie (12 h).
+  Mutations require POST + matching `Origin` + JSON bodies.
+- Login attempts are rate-limited per IP and globally.
+- No secrets or server addresses live in the repository — everything is
+  configured through environment variables.
 
-## Learn More
+Details and known trade-offs: [SECURITY.md](SECURITY.md).
 
-To learn more about Next.js, take a look at the following resources:
+## Requirements
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- A Linux server set up with a recent
+  [openvpn-install.sh](https://github.com/angristan/openvpn-install) (with the
+  `client` CLI and `OUTPUT_FORMAT=json`), systemd, `sudo`, `socat`, `curl`.
+- **Node.js ≥ 24.7** on the server (uses `crypto.argon2`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Try it locally (demo mode)
 
-## Deploy on Vercel
+```bash
+npm ci
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open http://127.0.0.1:8081 and sign in as `admin` / `demo`. Demo mode is the
+default whenever `PANEL_MODE` is not `live`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Install on your VPN server
+
+1. Install Node.js ≥ 24.7, then clone this repository on the server:
+
+   ```bash
+   git clone https://github.com/<you>/openvpn-panel.git && cd openvpn-panel
+   ```
+
+2. Run the installer (prompts for the admin password; only its hash is stored):
+
+   ```bash
+   sudo ./server/install.sh --bind 10.8.0.1
+   ```
+
+   Useful options: `--port 8081`, `--admin-user admin`,
+   `--installer /root/openvpn-install.sh`, `--mgmt-bridge unix`,
+   `--reset-password`, `--deploy-key "ssh-ed25519 AAAA…"`. Run with `--help`
+   for all of them. It is idempotent — re-run it any time.
+
+3. Deploy a build — either through GitHub Actions (below) or by hand:
+
+   ```bash
+   npm ci && npm run build && scripts/package-release.sh
+   sudo /usr/local/sbin/openvpn-panel-deploy < release.tar.gz
+   ```
+
+4. Allow the port on the VPN interface only, e.g.
+   `ufw allow in on tun0 to 10.8.0.1 port 8081 proto tcp`.
+
+### What the installer sets up
+
+| Path | Purpose |
+| --- | --- |
+| `/usr/local/sbin/openvpn-install.sh` | root-only copy of the installer |
+| `/usr/local/sbin/openvpn-panel-helper` | the only command the panel may `sudo` |
+| `/etc/sudoers.d/openvpn-panel` | sudo rule for the helper (and deploy script) |
+| `/etc/openvpn-panel/env` | configuration, `0600 root` |
+| `/var/lib/openvpn-panel/audit.log` | audit log |
+| `/opt/openvpn-panel/releases/*`, `current` | deployed releases |
+| `openvpn-panel.service` | the panel |
+| `openvpn-panel-mgmt.service` | socat bridge to the management socket |
+
+## Configuration
+
+All settings are environment variables, validated at startup
+(see [.env.example](.env.example)):
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `PANEL_MODE` | `demo` | `live` for a real server |
+| `PANEL_HOST` | `127.0.0.1` | bind address |
+| `PANEL_PORT` | `8081` | |
+| `OVPN_MGMT` | `tcp:127.0.0.1:7505` | or `unix:/path/to.sock` |
+| `PANEL_HELPER` | `/usr/local/sbin/openvpn-panel-helper` | |
+| `ADMIN_USER` | `admin` | |
+| `ADMIN_PASSWORD_HASH` | — | required in live mode; `npm run hash-password` |
+| `SESSION_SECRET` | — | ≥ 32 chars, required in live mode |
+| `AUDIT_LOG_PATH` | `./data/audit.log` | |
+
+## Continuous deployment (GitHub Actions)
+
+`ci.yml` runs lint, typecheck, tests, build and ShellCheck on every push and
+PR. `deploy.yml` runs on pushes to `main`: it builds the standalone bundle,
+packs it into `release.tar.gz` and pipes it over SSH to the server, where
+`openvpn-panel-deploy` installs it, checks `/api/health` and rolls back on
+failure (keeping the last 3 releases).
+
+1. Create a dedicated key pair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.
+2. On the server: `sudo ./server/install.sh --deploy-key "$(cat deploy_key.pub)"`.
+   The key can do nothing but run the deploy script.
+3. Add repository secrets:
+   - `DEPLOY_HOST` — server hostname or IP
+   - `DEPLOY_SSH_KEY` — contents of `deploy_key`
+   - `DEPLOY_KNOWN_HOSTS` — output of `ssh-keyscan -t ed25519 <host>`
+     (verify the fingerprint out of band)
+   - optional repository *variable* `DEPLOY_SSH_PORT` (default 22)
+
+Without these secrets (e.g. in forks) the deploy job is skipped, not failed.
+
+## Upgrade
+
+- **Panel:** push to `main`, or build and pipe a new `release.tar.gz` into
+  `openvpn-panel-deploy`.
+- **Server scripts:** `git pull && sudo ./server/install.sh` (keeps your
+  password and settings).
+- **openvpn-install.sh:** update your copy, then
+  `sudo ./server/install.sh --installer /path/to/openvpn-install.sh`.
+
+## Uninstall
+
+```bash
+sudo ./server/uninstall.sh           # keeps /etc/openvpn-panel and the audit log
+sudo ./server/uninstall.sh --purge   # removes them too
+```
+
+OpenVPN and your clients are not affected.
+
+## Development
+
+```bash
+npm run dev         # demo mode on 127.0.0.1:8081
+npm test            # vitest
+npm run lint
+npm run typecheck
+npm run build       # standalone output in .next/standalone
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE)

@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Release staging from scripts/package-release.sh.
+    "release/**",
   ]),
 ]);
 
