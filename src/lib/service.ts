@@ -1,5 +1,5 @@
 import { isServerCn } from "./names";
-import type { Backend, PkiStatus, ServerStatus, VpnClient } from "./types";
+import type { Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "./types";
 
 /** Error whose message is safe to show to the (authenticated) admin. */
 export class PanelError extends Error {
@@ -56,14 +56,22 @@ export class PanelService {
   }
 
   async revokeClient(name: string): Promise<void> {
+    await this.findActive(name, "is already revoked");
+    await this.backend.revokeClient(name);
+  }
+
+  async renewClient(name: string, options?: CertOptions): Promise<string> {
+    await this.findActive(name, "is revoked and cannot be renewed");
+    return this.backend.renewClient(name, options);
+  }
+
+  private async findActive(name: string, revokedMessage: string): Promise<VpnClient> {
     assertNotServer(name);
     const existing = await this.backend.listClients();
     const target = existing.find((c) => c.name === name);
     if (!target) throw new PanelError(`Client "${name}" not found`, 404);
-    if (target.status === "revoked") {
-      throw new PanelError(`Client "${name}" is already revoked`, 409);
-    }
-    await this.backend.revokeClient(name);
+    if (target.status === "revoked") throw new PanelError(`Client "${name}" ${revokedMessage}`, 409);
+    return target;
   }
 
   async disconnectClient(name: string): Promise<boolean> {
