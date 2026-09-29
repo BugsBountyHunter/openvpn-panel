@@ -17,7 +17,7 @@ reachable only by the administrator, ideally only over the VPN itself.
   systemd sandbox (`ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`).
 - Its only privilege is a sudoers rule for
   `/usr/local/sbin/openvpn-panel-helper`, a short, root-owned bash script that
-  allows exactly `add`, `revoke`, `list`, `status` and re-validates the client
+  allows exactly `add`, `revoke`, `list`, `status`, `pki` and re-validates the client
   name (`^[A-Za-z0-9_-]{1,32}$`, never `server_*`). Node calls it with
   `execFile` — no shell is involved.
 - `openvpn-install.sh` is copied root-owned (`0700`) so the panel user cannot

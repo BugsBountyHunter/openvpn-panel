@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { HelperRunner, HelperVerb } from "../helper";
 import { MgmtError, type MgmtClient, type MgmtSession } from "../mgmt/client";
-import { LiveBackend, parseCertList } from "./live";
+import { LiveBackend, parseCertList, parsePki } from "./live";
 
 const fixture = (name: string) => readFileSync(join(__dirname, "../../../test/fixtures", name), "utf8");
 const STATUS3_LINES = fixture("status3.txt").split(/\r?\n/).filter((l) => l && l !== "END");
@@ -63,6 +63,21 @@ describe("parseCertList", () => {
     expect(parseCertList('{"clients":[]}')).toEqual([]);
     expect(() => parseCertList("nope")).toThrow();
     expect(() => parseCertList('{"foo":1}')).toThrow();
+  });
+});
+
+describe("parsePki", () => {
+  it("converts epoch seconds to milliseconds and keeps nulls", () => {
+    expect(parsePki('{"server_cert_not_after":2081234567,"ca_cert_not_after":null,"crl_next_update":1790000000}')).toEqual({
+      serverCertExpiresAt: 2_081_234_567_000,
+      caCertExpiresAt: null,
+      crlNextUpdate: 1_790_000_000_000,
+    });
+  });
+
+  it("rejects malformed output", () => {
+    expect(() => parsePki("nope")).toThrow(/no PKI status/);
+    expect(() => parsePki('{"server_cert_not_after":"soon"}')).toThrow(/unexpected PKI status/);
   });
 });
 
@@ -153,5 +168,22 @@ describe("LiveBackend", () => {
     await expect(backend.disconnectClient("a\nb")).rejects.toThrow();
     expect(helper.calls).toEqual([]);
     expect(mgmt.sent).toEqual([]);
+  });
+
+  it("reads PKI dates through the helper and caches them", async () => {
+    const helper = fakeHelper({ pki: '{"server_cert_not_after":2081234567,"ca_cert_not_after":2081234567,"crl_next_update":null}' });
+    const backend = new LiveBackend(fakeMgmt(MGMT_REPLIES), helper);
+    const first = await backend.getPki();
+    expect(first.crlNextUpdate).toBeNull();
+    await backend.getPki();
+    expect(helper.calls).toEqual([["pki", undefined]]);
+  });
+
+  it("does not cache a failed PKI read", async () => {
+    const helper = fakeHelper({});
+    const backend = new LiveBackend(fakeMgmt(MGMT_REPLIES), helper);
+    await expect(backend.getPki()).rejects.toThrow();
+    await expect(backend.getPki()).rejects.toThrow();
+    expect(helper.calls).toHaveLength(2);
   });
 });

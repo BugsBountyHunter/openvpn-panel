@@ -7,7 +7,7 @@ import { CLIENT_NAME_PATTERN } from "./names";
  * here too so bad input never reaches sudo.
  */
 
-export type HelperVerb = "add" | "revoke" | "list" | "status";
+export type HelperVerb = "add" | "revoke" | "list" | "status" | "pki";
 
 export interface HelperRunner {
   run(verb: HelperVerb, name?: string): Promise<string>;

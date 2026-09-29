@@ -1,5 +1,5 @@
 import { isServerCn } from "./names";
-import type { Backend, ServerStatus, VpnClient } from "./types";
+import type { Backend, PkiStatus, ServerStatus, VpnClient } from "./types";
 
 /** Error whose message is safe to show to the (authenticated) admin. */
 export class PanelError extends Error {
@@ -69,5 +69,9 @@ export class PanelService {
   async disconnectClient(name: string): Promise<boolean> {
     assertNotServer(name);
     return this.backend.disconnectClient(name);
+  }
+
+  getPki(): Promise<PkiStatus> {
+    return this.backend.getPki();
   }
 }

@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - Clients table: status filter (active, online, offline, expiring within 30
   days, revoked, all) with counts, search by name or IP address, and sortable
   Name, Status, Cert expiry, In / Out and Connected columns.
+- Overview warns 30 days before the server certificate, the CA certificate or
+  the CRL expires (red within 7 days or once expired), with the command to fix
+  it. New read-only `pki` helper verb reads the dates with `openssl`; results
+  are cached for 10 minutes.
 
 ## [0.1.0] - 2026-09-29
 
