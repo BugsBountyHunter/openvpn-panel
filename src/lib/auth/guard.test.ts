@@ -1,6 +1,10 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { withAuth } from "./guard";
-import { SESSION_COOKIE, createSessionToken } from "./session";
+import { SESSION_COOKIE, SESSION_TTL_SECONDS, createSessionToken } from "./session";
+import { EMPTY_AUTH_STATE, sessionEpochFor } from "./state";
 
 const SECRET = "g".repeat(40);
 const ORIGIN = "http://10.8.0.1:8081";
@@ -10,13 +14,16 @@ beforeAll(() => {
   process.env.PANEL_MODE = "demo";
   process.env.SESSION_SECRET = SECRET;
   process.env.ADMIN_USER = "admin";
+  delete process.env.ADMIN_PASSWORD_HASH;
+  process.env.AUDIT_LOG_PATH = join(mkdtempSync(join(tmpdir(), "guard-")), "audit.log");
 });
 
 function request(method: string, headers: Record<string, string> = {}): Request {
   return new Request(`${ORIGIN}/api/x`, { method, headers: { host: "10.8.0.1:8081", ...headers } });
 }
 
-const cookie = (user = "admin") => `${SESSION_COOKIE}=${createSessionToken(user, SECRET)}`;
+const cookie = (user = "admin") =>
+  `${SESSION_COOKIE}=${createSessionToken(user, SECRET, Date.now(), SESSION_TTL_SECONDS, sessionEpochFor(null, EMPTY_AUTH_STATE))}`;
 const handler = withAuth(async (_req, _ctx, auth) => Response.json(auth));
 
 describe("withAuth", () => {

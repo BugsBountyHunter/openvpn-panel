@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format follows
   (user, target, IP, detail); filters live in the URL and work without
   JavaScript. "Export CSV" downloads every matching entry (spreadsheet
   formula injection is neutralized) and is itself recorded in the audit log.
+- Account page: change the admin password from the panel (current password
+  required, rate-limited, argon2id, `install.sh --reset-password` still wins)
+  and "Sign out other sessions". Sessions are bound to a session epoch and to
+  the active password, so both actions — and a password reset with the
+  installer — end every other session immediately. Both are audited.
+  **Upgrade note:** existing sessions are signed out once.
 - Live view: overview and clients show "Live · updated Xs ago" with a
   Pause/Resume toggle (remembered per browser), and refresh immediately when
   the tab becomes visible again.
