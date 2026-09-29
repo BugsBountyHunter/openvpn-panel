@@ -3,6 +3,7 @@ import { HelperError, type HelperRunner } from "../helper";
 import { MgmtError, type MgmtClient } from "../mgmt/client";
 import { parseKill, parseLoadStats, parseState, parseStatus3, parseVersion, type MgmtClientEntry } from "../mgmt/parse";
 import { CLIENT_NAME_PATTERN } from "../names";
+import { TtlCache } from "../ttl-cache";
 import type { AddOptions, Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
@@ -135,48 +136,50 @@ export function mergeClients(certs: CertRecord[], sessions: MgmtClientEntry[]): 
 
 export class LiveBackend implements Backend {
   readonly kind = "live";
-  private certCache: { at: number; value: Promise<CertRecord[]> } | null = null;
-  private pkiCache: { at: number; value: Promise<PkiStatus> } | null = null;
+  private readonly certs: TtlCache<CertRecord[]>;
+  private readonly pki: TtlCache<PkiStatus>;
+  // The management interface serves one client at a time, so every open tab
+  // polling it would queue; a short cache lets them share each read.
+  private readonly liveStatus: TtlCache<ServerStatus>;
+  private readonly sessions: TtlCache<MgmtClientEntry[]>;
 
   constructor(
     private readonly mgmt: Pick<MgmtClient, "session">,
     private readonly helper: HelperRunner,
-    private readonly certCacheMs: number = 15_000,
-    private readonly pkiCacheMs: number = 10 * 60_000,
-  ) {}
+    certCacheMs: number = 15_000,
+    /** PKI dates change only on renew/revoke, so a long cache keeps sudo calls rare. */
+    pkiCacheMs: number = 10 * 60_000,
+    liveCacheMs: number = 2_000,
+  ) {
+    this.certs = new TtlCache(certCacheMs);
+    this.pki = new TtlCache(pkiCacheMs);
+    this.liveStatus = new TtlCache(liveCacheMs);
+    this.sessions = new TtlCache(liveCacheMs);
+  }
 
-  /** Dates change only on renew/revoke, so a long cache keeps sudo calls rare. */
   getPki(): Promise<PkiStatus> {
-    const now = Date.now();
-    if (this.pkiCache && now - this.pkiCache.at < this.pkiCacheMs) return this.pkiCache.value;
-    const value = this.helper.run("pki").then(parsePki);
-    this.pkiCache = { at: now, value };
-    value.catch(() => {
-      if (this.pkiCache?.value === value) this.pkiCache = null;
-    });
-    return value;
+    return this.pki.get(async () => parsePki(await this.helper.run("pki")));
   }
 
   private listCerts(): Promise<CertRecord[]> {
-    const now = Date.now();
-    if (this.certCache && now - this.certCache.at < this.certCacheMs) return this.certCache.value;
-    const value = this.helper.run("list").then(parseCertList);
-    this.certCache = { at: now, value };
-    value.catch(() => {
-      if (this.certCache?.value === value) this.certCache = null;
-    });
-    return value;
+    return this.certs.get(async () => parseCertList(await this.helper.run("list")));
   }
 
   private invalidateCerts(): void {
-    this.certCache = null;
-    // Revoking regenerates the CRL, so its date may have moved too.
-    this.pkiCache = null;
+    this.certs.clear();
+    // Revoking and renewing regenerate the CRL, so its date may have moved too.
+    this.pki.clear();
+    this.invalidateLive();
   }
 
-  async getStatus(): Promise<ServerStatus> {
-    try {
-      return await this.mgmt.session(async (s) => {
+  private invalidateLive(): void {
+    this.liveStatus.clear();
+    this.sessions.clear();
+  }
+
+  private readStatus(): Promise<ServerStatus> {
+    return this.liveStatus.get(() =>
+      this.mgmt.session(async (s) => {
         const state = parseState(await s.multi("state"));
         const stats = parseLoadStats(await s.single("load-stats"));
         const version = parseVersion(await s.multi("version"));
@@ -189,7 +192,19 @@ export class LiveBackend implements Backend {
           version,
           error: null,
         };
-      });
+      }),
+    );
+  }
+
+  private readSessions(): Promise<MgmtClientEntry[]> {
+    return this.sessions.get(() =>
+      this.mgmt.session(async (s) => parseStatus3((await s.multi("status 3")).join("\n")).clients),
+    );
+  }
+
+  async getStatus(): Promise<ServerStatus> {
+    try {
+      return await this.readStatus();
     } catch (error) {
       if (!(error instanceof MgmtError)) throw error;
       return {
@@ -205,13 +220,10 @@ export class LiveBackend implements Backend {
   }
 
   async listClients(): Promise<VpnClient[]> {
-    const [certs, live] = await Promise.allSettled([
-      this.listCerts(),
-      this.mgmt.session(async (s) => parseStatus3((await s.multi("status 3")).join("\n"))),
-    ]);
+    const [certs, live] = await Promise.allSettled([this.listCerts(), this.readSessions()]);
     if (certs.status === "rejected") throw certs.reason;
     // If OpenVPN is down we still show certificates, just nobody online.
-    const sessions = live.status === "fulfilled" ? live.value.clients : [];
+    const sessions = live.status === "fulfilled" ? live.value : [];
     return mergeClients(certs.value, sessions);
   }
 
@@ -244,6 +256,10 @@ export class LiveBackend implements Backend {
 
   async disconnectClient(name: string): Promise<boolean> {
     assertName(name);
-    return this.mgmt.session(async (s) => parseKill(await s.single(`kill ${name}`)));
+    try {
+      return await this.mgmt.session(async (s) => parseKill(await s.single(`kill ${name}`)));
+    } finally {
+      this.invalidateLive();
+    }
   }
 }

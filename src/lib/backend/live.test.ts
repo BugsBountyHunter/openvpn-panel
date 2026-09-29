@@ -201,4 +201,29 @@ describe("LiveBackend", () => {
     const backend = new LiveBackend(fakeMgmt(MGMT_REPLIES), fakeHelper({ renew: "oops" }));
     await expect(backend.renewClient("alice-laptop")).rejects.toThrow(/profile/);
   });
+
+  it("shares management reads between callers for a short time", async () => {
+    const mgmt = fakeMgmt(MGMT_REPLIES);
+    const backend = new LiveBackend(mgmt, fakeHelper({ list: CLIENT_LIST }));
+    await Promise.all([backend.listClients(), backend.listClients(), backend.getStatus(), backend.getStatus()]);
+    expect(mgmt.sent.filter((c) => c === "status 3")).toHaveLength(1);
+    expect(mgmt.sent.filter((c) => c === "load-stats")).toHaveLength(1);
+  });
+
+  it("drops cached live data after a disconnect", async () => {
+    const mgmt = fakeMgmt(MGMT_REPLIES);
+    const backend = new LiveBackend(mgmt, fakeHelper({ list: CLIENT_LIST }));
+    await backend.listClients();
+    await backend.disconnectClient("alice-laptop");
+    await backend.listClients();
+    expect(mgmt.sent.filter((c) => c === "status 3")).toHaveLength(2);
+  });
+
+  it("re-reads live data once the cache expires", async () => {
+    const mgmt = fakeMgmt(MGMT_REPLIES);
+    const backend = new LiveBackend(mgmt, fakeHelper({ list: CLIENT_LIST }), 15_000, 600_000, 0);
+    await backend.listClients();
+    await backend.listClients();
+    expect(mgmt.sent.filter((c) => c === "status 3")).toHaveLength(2);
+  });
 });
