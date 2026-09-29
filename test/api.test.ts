@@ -21,6 +21,7 @@ type Routes = {
   renew: typeof import("@/app/api/clients/[name]/renew/route");
   disconnect: typeof import("@/app/api/clients/[name]/disconnect/route");
   status: typeof import("@/app/api/status/route");
+  auditExport: typeof import("@/app/api/audit/export/route");
   health: typeof import("@/app/api/health/route");
   proxy: typeof import("@/proxy");
   demo: typeof import("@/lib/backend/demo");
@@ -49,6 +50,7 @@ beforeAll(async () => {
     renew: await import("@/app/api/clients/[name]/renew/route"),
     disconnect: await import("@/app/api/clients/[name]/disconnect/route"),
     status: await import("@/app/api/status/route"),
+    auditExport: await import("@/app/api/audit/export/route"),
     health: await import("@/app/api/health/route"),
     proxy: await import("@/proxy"),
     demo: await import("@/lib/backend/demo"),
@@ -192,6 +194,25 @@ describe("API", () => {
     const body = await (await r.status.GET(req("/api/status", { cookie }), {})).json();
     expect(body.data.status.up).toBe(true);
     expect(Array.isArray(body.data.clients)).toBe(true);
+  });
+
+  it("exports the filtered audit log as CSV and audits the export", async () => {
+    expect((await r.auditExport.GET(req("/api/audit/export"), {})).status).toBe(401);
+    const cookie = await login();
+    await r.revoke.POST(req("/x", { method: "POST", cookie }), params("alice-laptop"));
+
+    const res = await r.auditExport.GET(req("/api/audit/export?action=revoke&result=ok", { cookie }), {});
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="openvpn-panel-audit-\d{8}\.csv"$/);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const lines = (await res.text()).trim().split("\r\n");
+    expect(lines[0]).toBe("timestamp,actor,action,target,ip,result,detail");
+    expect(lines.slice(1).length).toBeGreaterThan(0);
+    expect(lines.slice(1).every((l) => l.includes(",revoke,") && l.includes(",ok,"))).toBe(true);
+    expect(lines.some((l) => l.includes(",alice-laptop,"))).toBe(true);
+
+    expect(auditActions().at(-1)).toMatchObject({ action: "audit_export", ok: true });
   });
 
   it("logout clears the cookie", async () => {

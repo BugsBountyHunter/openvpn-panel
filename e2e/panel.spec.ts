@@ -53,8 +53,33 @@ test("live view shows freshness and can be paused", async ({ page }) => {
 
 test("the server certificate is never listed", async ({ page }) => {
   await signIn(page, "/clients");
-  await page.getByLabel(/Show revoked/).check();
+  await page.getByLabel("Filter by status").selectOption("all");
   await expect(page.getByText(/^server_/)).toHaveCount(0);
+});
+
+test("clients can be filtered, searched and sorted", async ({ page }) => {
+  await signIn(page, "/clients");
+  const table = page.getByRole("table");
+  const dataRows = table.getByRole("row").filter({ has: page.getByRole("cell") });
+
+  await page.getByLabel("Filter by status").selectOption("expiring");
+  await expect(dataRows).toHaveCount(1);
+  await expect(clientRow(page, "erin-tablet")).toBeVisible();
+
+  await page.getByLabel("Filter by status").selectOption("active");
+  await page.getByLabel("Search clients by name or IP").fill("203.0.113");
+  await expect(dataRows).toHaveCount(2);
+  await expect(clientRow(page, "alice-laptop")).toBeVisible();
+  await expect(clientRow(page, "frank-home")).toBeVisible();
+
+  await page.getByLabel("Search clients by name or IP").fill("");
+  const nameHeader = table.getByRole("columnheader", { name: "Name" });
+  await nameHeader.getByRole("button").click();
+  await expect(nameHeader).toHaveAttribute("aria-sort", "ascending");
+  await expect(dataRows.first().getByRole("cell").first()).toHaveText("alice-laptop");
+  await nameHeader.getByRole("button").click();
+  await expect(nameHeader).toHaveAttribute("aria-sort", "descending");
+  await expect(dataRows.first().getByRole("cell").first()).toHaveText("frank-home");
 });
 
 test("add client downloads the profile", async ({ page }) => {
@@ -137,7 +162,7 @@ test("revoke asks for confirmation and hides the client", async ({ page }) => {
 
   await expect(page.getByRole("status")).toContainText('Revoked "e2e-laptop"');
   await expect(clientRow(page, "e2e-laptop")).toHaveCount(0);
-  await page.getByLabel(/Show revoked/).check();
+  await page.getByLabel("Filter by status").selectOption("revoked");
   await expect(clientRow(page, "e2e-laptop").getByText("revoked")).toBeVisible();
 });
 
@@ -170,6 +195,32 @@ test("audit log records the actions", async ({ page }) => {
   await expect(table.getByRole("row").filter({ hasText: "Disconnected client" })).not.toHaveCount(0);
   await expect(table.getByRole("row").filter({ hasText: "Renewed client" }).filter({ hasText: "erin-tablet" })).toBeVisible();
   await expect(table.getByRole("row").filter({ hasText: "Failed sign-in" })).not.toHaveCount(0);
+});
+
+test("audit log can be filtered and exported as CSV", async ({ page }) => {
+  await signIn(page, "/audit");
+  await page.getByLabel("Action").selectOption("revoke");
+  await page.getByLabel("Search audit log").fill("e2e-laptop");
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  await expect(page).toHaveURL(/action=revoke/);
+  const dataRows = page.getByRole("table").getByRole("row").filter({ has: page.getByRole("cell") });
+  await expect(dataRows).toHaveCount(1);
+  await expect(dataRows.first()).toContainText("Revoked client");
+  await expect(page.getByRole("heading", { name: "1 matching event" })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Export CSV" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^openvpn-panel-audit-\d{8}\.csv$/);
+  const lines = (await readFile(await download.path(), "utf8")).trim().split("\r\n");
+  expect(lines[0]).toBe("timestamp,actor,action,target,ip,result,detail");
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toContain(",revoke,e2e-laptop,");
+
+  await page.getByRole("link", { name: "Reset" }).click();
+  await expect(page).toHaveURL(/\/audit$/);
+  await expect(page.getByRole("table").getByRole("row").filter({ hasText: "Exported audit log" })).not.toHaveCount(0);
 });
 
 test("account: change the password and sign out other sessions", async ({ page, browser }) => {

@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Clients table: status filter (active, online, offline, expiring within 30
+  days, revoked, all) with counts, search by name or IP address, and sortable
+  Name, Status, Cert expiry, In / Out and Connected columns.
+- Audit log: filter by action, result, date range (UTC) and free text
+  (user, target, IP, detail); filters live in the URL and work without
+  JavaScript. "Export CSV" downloads every matching entry (spreadsheet
+  formula injection is neutralized) and is itself recorded in the audit log.
 - Account page: change the admin password from the panel (current password
   required, rate-limited, argon2id, `install.sh --reset-password` still wins)
   and "Sign out other sessions". Sessions are bound to a session epoch and to
@@ -17,7 +24,6 @@ All notable changes to this project are documented here. The format follows
 - Live view: overview and clients show "Live · updated Xs ago" with a
   Pause/Resume toggle (remembered per browser), and refresh immediately when
   the tab becomes visible again.
-
 - Add client: optional certificate validity (1–7300 days) and optional
   passphrase-protected private key. The passphrase is sent to the helper on
   stdin and never appears in argv, logs, the audit log or on disk.
