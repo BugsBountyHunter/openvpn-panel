@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - Clients table: status filter (active, online, offline, expiring within 30
   days, revoked, all) with counts, search by name or IP address, and sortable
   Name, Status, Cert expiry, In / Out and Connected columns.
+- Audit log: filter by action, result, date range (UTC) and free text
+  (user, target, IP, detail); filters live in the URL and work without
+  JavaScript. "Export CSV" downloads every matching entry (spreadsheet
+  formula injection is neutralized) and is itself recorded in the audit log.
 - Overview warns 30 days before the server certificate, the CA certificate or
   the CRL expires (red within 7 days or once expired), with the command to fix
   it. New read-only `pki` helper verb reads the dates with `openssl`; results

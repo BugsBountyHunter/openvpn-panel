@@ -133,6 +133,32 @@ test("audit log records the actions", async ({ page }) => {
   await expect(table.getByRole("row").filter({ hasText: "Failed sign-in" })).not.toHaveCount(0);
 });
 
+test("audit log can be filtered and exported as CSV", async ({ page }) => {
+  await signIn(page, "/audit");
+  await page.getByLabel("Action").selectOption("revoke");
+  await page.getByLabel("Search audit log").fill("e2e-laptop");
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  await expect(page).toHaveURL(/action=revoke/);
+  const dataRows = page.getByRole("table").getByRole("row").filter({ has: page.getByRole("cell") });
+  await expect(dataRows).toHaveCount(1);
+  await expect(dataRows.first()).toContainText("Revoked client");
+  await expect(page.getByRole("heading", { name: "1 matching event" })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Export CSV" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^openvpn-panel-audit-\d{8}\.csv$/);
+  const lines = (await readFile(await download.path(), "utf8")).trim().split("\r\n");
+  expect(lines[0]).toBe("timestamp,actor,action,target,ip,result,detail");
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toContain(",revoke,e2e-laptop,");
+
+  await page.getByRole("link", { name: "Reset" }).click();
+  await expect(page).toHaveURL(/\/audit$/);
+  await expect(page.getByRole("table").getByRole("row").filter({ hasText: "Exported audit log" })).not.toHaveCount(0);
+});
+
 test("sign out ends the session", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Sign out" }).click();
