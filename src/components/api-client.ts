@@ -1,3 +1,5 @@
+import type { AddOptions } from "@/lib/types";
+
 /** Browser-side helpers for calling the panel API. */
 
 interface ApiEnvelope {
@@ -51,8 +53,8 @@ async function download(response: Response, filename: string): Promise<void> {
 }
 
 /** Creates a client and downloads its profile. */
-export async function addClientAndDownload(name: string): Promise<void> {
-  await download(await postJson("/api/clients", { name }), `${name}.ovpn`);
+export async function addClientAndDownload(name: string, options: AddOptions = {}): Promise<void> {
+  await download(await postJson("/api/clients", { name, ...options }), `${name}.ovpn`);
 }
 
 /** Renews a client certificate and downloads the new profile. */

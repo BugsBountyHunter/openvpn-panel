@@ -20,6 +20,17 @@ describe("buildHelperArgs", () => {
     expect(() => buildHelperArgs("/h", "list", undefined, { certDays: 30 })).toThrow(HelperError);
   });
 
+  it("builds add options without ever putting the passphrase in argv", () => {
+    expect(buildHelperArgs("/h", "add", "alice", { certDays: 30 })).toEqual(["-n", "--", "/h", "add", "alice", "30"]);
+    const args = buildHelperArgs("/h", "add", "alice", { passphrase: "correct horse" });
+    expect(args).toEqual(["-n", "--", "/h", "add", "alice", "default", "passphrase"]);
+    expect(buildHelperArgs("/h", "add", "alice", { certDays: 90, passphrase: "correct horse" })).toEqual([
+      "-n", "--", "/h", "add", "alice", "90", "passphrase",
+    ]);
+    expect(() => buildHelperArgs("/h", "renew", "alice", { passphrase: "correct horse" })).toThrow(HelperError);
+    expect(() => buildHelperArgs("/h", "add", "alice", { passphrase: "a\nb" })).toThrow(HelperError);
+  });
+
   it("rejects bad or missing names", () => {
     expect(() => buildHelperArgs("/h", "add")).toThrow(HelperError);
     expect(() => buildHelperArgs("/h", "revoke", "$(reboot)")).toThrow(HelperError);
@@ -44,6 +55,15 @@ describe("SudoHelperRunner", () => {
   });
 
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("sends the passphrase on stdin and closes stdin otherwise", async () => {
+    const echoStdin = join(dir, "sudo-stdin");
+    writeFileSync(echoStdin, "#!/bin/sh\nprintf 'stdin=['; cat; printf ']'\n");
+    chmodSync(echoStdin, 0o755);
+    const runner = new SudoHelperRunner("/h", 5000, echoStdin);
+    expect(await runner.run("add", "alice", { passphrase: "correct horse" })).toBe("stdin=[correct horse\n]");
+    expect(await runner.run("add", "alice")).toBe("stdin=[]");
+  });
 
   it("passes arguments verbatim", async () => {
     const runner = new SudoHelperRunner("/usr/local/sbin/openvpn-panel-helper", 5000, fakeSudo);

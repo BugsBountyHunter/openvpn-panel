@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # openvpn-panel-helper — the ONLY program the panel may run as root (via sudo).
 #
-# Usage: openvpn-panel-helper <add|revoke|renew|list|status|pki> [name] [days]
+# Usage: openvpn-panel-helper <add|revoke|renew|list|status|pki> [name] [days] [passphrase]
 #
-#   add <name>           create a client; prints the .ovpn profile on stdout
+#   add <name> [days|default] [passphrase]
+#                        create a client; prints the .ovpn profile on stdout.
+#                        With the literal word "passphrase", the key passphrase
+#                        is read as one line from stdin (never from argv).
 #   revoke <name>        revoke a client certificate
 #   renew <name> [days]  re-issue a client certificate (the old one is revoked);
 #                        prints the new .ovpn profile on stdout
@@ -31,23 +34,26 @@ die() {
 }
 
 usage() {
-	die "usage: openvpn-panel-helper <add|revoke|renew|list|status|pki> [name] [days]"
+	die "usage: openvpn-panel-helper <add|revoke|renew|list|status|pki> [name] [days] [passphrase]"
 }
 
 [[ $EUID -eq 0 ]] || die "must run as root"
-[[ $# -ge 1 && $# -le 3 ]] || usage
+[[ $# -ge 1 && $# -le 4 ]] || usage
 
 verb=$1
 name=${2-}
 days=${3-}
+with_passphrase=${4-}
+[[ $days == default ]] && days=""
 
 case "$verb" in
 add | revoke | renew)
-	if [[ $verb == renew ]]; then
-		[[ $# -eq 2 || $# -eq 3 ]] || usage
-	else
-		[[ $# -eq 2 ]] || usage
-	fi
+	case "$verb" in
+	add) [[ $# -ge 2 && $# -le 4 ]] || usage ;;
+	renew) [[ $# -eq 2 || $# -eq 3 ]] && [[ ${3-} != default ]] || usage ;;
+	revoke) [[ $# -eq 2 ]] || usage ;;
+	esac
+	[[ -z $with_passphrase || $with_passphrase == passphrase ]] || usage
 	[[ $name =~ $NAME_RE ]] || die "invalid client name (allowed: 1-32 of A-Z a-z 0-9 _ -)"
 	[[ $name != server_* ]] || die "refusing to modify the server certificate"
 	if [[ -n $days ]]; then
@@ -131,7 +137,20 @@ add | renew)
 	trap 'rm -rf -- "$workdir"' EXIT
 	profile="$workdir/profile.ovpn"
 	if [[ $verb == add ]]; then
-		run_installer client add "$name" --output "$profile" >&2
+		add_args=(client add "$name" --output "$profile")
+		[[ -n $days ]] && add_args+=(--cert-days "$days")
+		if [[ -n $with_passphrase ]]; then
+			# 8-128 chars, no control characters (src/lib/client-options.ts).
+			IFS= read -r -n 256 passphrase || true
+			((${#passphrase} >= 8 && ${#passphrase} <= 128)) || die "invalid passphrase"
+			[[ $passphrase != *[[:cntrl:]]* ]] || die "invalid passphrase"
+			# "--password" with no value makes the installer use $PASSPHRASE; it is
+			# exported only to this one command and never appears in argv.
+			PASSPHRASE=$passphrase run_installer "${add_args[@]}" --password >&2
+			unset passphrase
+		else
+			run_installer "${add_args[@]}" >&2
+		fi
 	else
 		# "client renew" has no --output; it honours CLIENT_FILEPATH instead.
 		CLIENT_FILEPATH=$profile run_installer client renew "$name" ${days:+--cert-days "$days"} >&2

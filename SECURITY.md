@@ -35,6 +35,10 @@ reachable only by the administrator, ideally only over the VPN itself.
 - Client profiles contain private keys. They are written by the installer to a
   private temporary directory, streamed to the browser and deleted. The panel
   never logs, caches or persists them; errors never include helper stdout.
+- Optional client-key passphrases travel browser → API (JSON body) → helper
+  **stdin** → `openvpn-install.sh` environment (`PASSPHRASE`, exported only to
+  that one command). They never appear in argv (`ps`), logs, the audit log or
+  on disk, and are limited to 8–128 characters without control characters.
 
 ### Web
 
