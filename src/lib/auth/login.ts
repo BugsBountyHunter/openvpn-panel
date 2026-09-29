@@ -3,6 +3,7 @@ import { DEMO_PASSWORD, type PanelConfig } from "../config";
 import { verifyPassword } from "./password";
 import type { LoginRateLimiter } from "./rate-limit";
 import { createSessionToken } from "./session";
+import { effectivePasswordHash, readAuthState, sessionEpochFor, type AuthState } from "./state";
 
 export interface LoginAttempt {
   username: string;
@@ -21,8 +22,14 @@ function safeEqual(a: string, b: string): boolean {
   return left.length === right.length ? timingSafeEqual(left, right) : !timingSafeEqual(right, right);
 }
 
-async function checkPassword(password: string, config: PanelConfig): Promise<boolean> {
-  if (config.adminPasswordHash) return verifyPassword(password, config.adminPasswordHash);
+/** Checks the admin password: the one set in the panel if any, else the env hash (or "demo"). */
+export async function checkPassword(
+  password: string,
+  config: PanelConfig,
+  state: AuthState = readAuthState(config.authStatePath),
+): Promise<boolean> {
+  const hash = effectivePasswordHash(config.adminPasswordHash, state);
+  if (hash) return verifyPassword(password, hash);
   return config.mode === "demo" && safeEqual(password, DEMO_PASSWORD);
 }
 
@@ -36,12 +43,16 @@ export async function attemptLogin(
   if (retryAfter > 0) {
     return { ok: false, status: 429, error: "Too many failed attempts. Try again later.", retryAfter };
   }
+  // Read once, before the slow verify, so the session matches what was checked.
+  const state = readAuthState(config.authStatePath);
   // Always verify the password, even for a wrong username, to avoid a timing oracle.
-  const passwordOk = await checkPassword(attempt.password, config);
+  const passwordOk = await checkPassword(attempt.password, config, state);
   const userOk = safeEqual(attempt.username, config.adminUser);
   if (passwordOk && userOk) {
     limiter.recordSuccess(attempt.ip);
-    return { ok: true, token: createSessionToken(config.adminUser, config.sessionSecret, now) };
+    const sessionEpoch = sessionEpochFor(config.adminPasswordHash, state);
+    const token = createSessionToken(config.adminUser, config.sessionSecret, now, undefined, sessionEpoch);
+    return { ok: true, token };
   }
   limiter.recordFailure(attempt.ip, now);
   return { ok: false, status: 401, error: "Invalid username or password" };

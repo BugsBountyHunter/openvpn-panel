@@ -20,6 +20,8 @@ const LABELS: Record<AuditAction, string> = {
   renew: "Renewed client",
   disconnect: "Disconnected client",
   audit_export: "Exported audit log",
+  password_change: "Changed password",
+  sessions_revoked: "Signed out other sessions",
 };
 
 const FIELD = "rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-text outline-none focus:border-accent";

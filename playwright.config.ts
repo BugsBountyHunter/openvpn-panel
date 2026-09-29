@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_AUDIT_LOG, E2E_STATE_DIR } from "./e2e/state";
 
 const PORT = 3199;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -33,7 +34,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "bash scripts/package-release.sh >/dev/null && node release/start.mjs",
+    // Audit log and auth state (panel-set password, revoked sessions) start clean on every run.
+    command: `rm -rf "${E2E_STATE_DIR}" && bash scripts/package-release.sh >/dev/null && node release/start.mjs`,
     url: `${BASE_URL}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
@@ -41,7 +43,7 @@ export default defineConfig({
       PANEL_MODE: "demo",
       PANEL_HOST: "127.0.0.1",
       PANEL_PORT: String(PORT),
-      AUDIT_LOG_PATH: "test-results/e2e-audit.log",
+      AUDIT_LOG_PATH: E2E_AUDIT_LOG,
     },
   },
 });

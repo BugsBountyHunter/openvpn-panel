@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { authStatePath } from "./auth/state";
 import { parseMgmtAddress, type MgmtAddress } from "./mgmt/address";
 
 const MIN_SECRET_LENGTH = 32;
@@ -70,6 +71,8 @@ export interface PanelConfig {
   adminPasswordHash: string | null;
   sessionSecret: string;
   auditLogPath: string;
+  /** Password set from the panel and session revocation; next to the audit log. */
+  authStatePath: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): PanelConfig {
@@ -95,6 +98,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): PanelConfig {
     adminPasswordHash: e.ADMIN_PASSWORD_HASH ?? null,
     sessionSecret: secret,
     auditLogPath: e.AUDIT_LOG_PATH,
+    authStatePath: authStatePath(e.AUDIT_LOG_PATH),
   };
 }
 

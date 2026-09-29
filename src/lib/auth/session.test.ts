@@ -29,3 +29,12 @@ describe("session tokens", () => {
     }
   });
 });
+
+describe("session epoch claim", () => {
+  it("round-trips the epoch and omits it when empty", () => {
+    const withEpoch = verifySessionToken(createSessionToken("admin", SECRET, NOW, 60, "abcd"), SECRET, NOW);
+    expect(withEpoch?.sep).toBe("abcd");
+    const without = verifySessionToken(createSessionToken("admin", SECRET, NOW, 60), SECRET, NOW);
+    expect(without).not.toHaveProperty("sep");
+  });
+});
