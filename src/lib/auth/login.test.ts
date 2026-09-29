@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../config";
 import { attemptLogin } from "./login";
 import { hashPassword } from "./password";
 import { LoginRateLimiter } from "./rate-limit";
 import { verifySessionToken } from "./session";
+import { isSessionCurrent, readAuthState, sessionEpochFor, writeAuthState } from "./state";
 
 const SECRET = "k".repeat(32);
 
@@ -52,5 +56,28 @@ describe("attemptLogin", () => {
     const live = await liveConfig();
     const no = await attemptLogin({ username: "admin", password: "demo", ip: "i" }, live, new LoginRateLimiter());
     expect(no.ok).toBe(false);
+  });
+});
+
+describe("attemptLogin after a revocation", () => {
+  it("issues sessions in the current epoch", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "login-"));
+    try {
+      const config = { ...(await liveConfig()), authStatePath: join(dir, "auth.json") };
+      await writeAuthState(config.authStatePath, { passwordHash: null, baseHash: null, sessionEpoch: "0123456789abcdef" });
+      const result = await attemptLogin(
+        { username: "admin", password: "the-right-password", ip: "10.8.0.2" },
+        config,
+        new LoginRateLimiter(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const session = verifySessionToken(result.token, SECRET);
+      const state = readAuthState(config.authStatePath);
+      expect(session?.sep).toBe(sessionEpochFor(config.adminPasswordHash, state));
+      expect(isSessionCurrent(session!, config.adminPasswordHash, state)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

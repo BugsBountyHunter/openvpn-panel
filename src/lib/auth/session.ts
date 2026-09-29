@@ -15,6 +15,8 @@ export interface SessionPayload {
   iat: number;
   /** Expiry, epoch seconds. */
   exp: number;
+  /** Session epoch (see auth/state.ts); absent on tokens from the initial epoch. */
+  sep?: string;
 }
 
 function sign(data: string, secret: string): Buffer {
@@ -26,9 +28,10 @@ export function createSessionToken(
   secret: string,
   nowMs: number = Date.now(),
   ttlSeconds: number = SESSION_TTL_SECONDS,
+  sessionEpoch: string = "",
 ): string {
   const iat = Math.floor(nowMs / 1000);
-  const payload: SessionPayload = { sub: user, iat, exp: iat + ttlSeconds };
+  const payload: SessionPayload = { sub: user, iat, exp: iat + ttlSeconds, ...(sessionEpoch ? { sep: sessionEpoch } : {}) };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${body}.${sign(body, secret).toString("base64url")}`;
 }
@@ -36,7 +39,8 @@ export function createSessionToken(
 function isPayload(value: unknown): value is SessionPayload {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.sub === "string" && Number.isInteger(v.iat) && Number.isInteger(v.exp);
+  const epochOk = v.sep === undefined || (typeof v.sep === "string" && v.sep.length <= 64);
+  return typeof v.sub === "string" && Number.isInteger(v.iat) && Number.isInteger(v.exp) && epochOk;
 }
 
 export function verifySessionToken(

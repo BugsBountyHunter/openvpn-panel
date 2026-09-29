@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { clientRow, signIn } from "./helpers";
+import { E2E_AUTH_STATE } from "./state";
 
 // Demo state lives in the server process, so these run in order.
 test.describe.configure({ mode: "serial" });
@@ -171,9 +172,54 @@ test("audit log records the actions", async ({ page }) => {
   await expect(table.getByRole("row").filter({ hasText: "Failed sign-in" })).not.toHaveCount(0);
 });
 
+test("account: change the password and sign out other sessions", async ({ page, browser }) => {
+  const other = await browser.newPage();
+  await signIn(other, "/clients");
+
+  await signIn(page, "/account");
+  const form = page.getByRole("form", { name: "Change password" });
+  await form.getByLabel("Current password").fill("demo");
+  await form.getByLabel("New password", { exact: true }).fill("short");
+  await expect(form.getByRole("button", { name: "Change password" })).toBeDisabled();
+  await form.getByLabel("New password", { exact: true }).fill("e2e new passphrase");
+  await form.getByLabel("Confirm new password").fill("e2e new passphrase");
+  await form.getByRole("button", { name: "Change password" }).click();
+  await expect(form.getByRole("status")).toContainText("Password changed");
+
+  // This tab stays signed in; the other one is signed out.
+  await page.goto("/clients");
+  await expect(page.getByRole("heading", { name: "Clients" })).toBeVisible();
+  await other.reload();
+  await expect(other).toHaveURL(/\/login/);
+
+  // Old password no longer works; new one does. Then restore it for later tests.
+  await other.getByLabel("Username").fill("admin");
+  await other.getByLabel("Password").fill("demo");
+  await other.getByRole("button", { name: "Sign in" }).click();
+  await expect(other.getByRole("main").getByRole("alert")).toHaveText("Invalid username or password");
+  await other.getByLabel("Password").fill("e2e new passphrase");
+  await other.getByRole("button", { name: "Sign in" }).click();
+  await expect(other.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Sign out other sessions" }).click();
+  await expect(page.getByText("Every other session was signed out.")).toBeVisible();
+  await other.reload();
+  await expect(other).toHaveURL(/\/login/);
+  await other.close();
+
+  await page.goto("/audit");
+  await expect(page.getByRole("row").filter({ hasText: "Changed password" })).not.toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: "Signed out other sessions" })).not.toHaveCount(0);
+  await expect(page.getByText("e2e new passphrase")).toHaveCount(0);
+
+  // Restore the demo password for later tests (same as an operator reset).
+  await rm(E2E_AUTH_STATE, { force: true });
+});
+
 test("sign out ends the session", async ({ page }) => {
   await signIn(page);
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login/);
   await page.goto("/clients");
   await expect(page).toHaveURL(/\/login/);

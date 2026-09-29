@@ -7,7 +7,7 @@ import { z } from "zod";
  * Profiles (.ovpn contents) and passwords are never passed in here.
  */
 
-export const AUDIT_ACTIONS = ["login", "login_failed", "logout", "add", "revoke", "renew", "disconnect"] as const;
+export const AUDIT_ACTIONS = ["login", "login_failed", "logout", "add", "revoke", "renew", "disconnect", "password_change", "sessions_revoked"] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 const entrySchema = z.object({

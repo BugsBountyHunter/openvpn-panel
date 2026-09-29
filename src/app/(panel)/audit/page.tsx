@@ -12,6 +12,8 @@ const LABELS: Record<AuditAction, string> = {
   revoke: "Revoked client",
   renew: "Renewed client",
   disconnect: "Disconnected client",
+  password_change: "Changed password",
+  sessions_revoked: "Signed out other sessions",
 };
 
 export default async function AuditPage() {

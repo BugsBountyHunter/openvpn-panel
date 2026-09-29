@@ -6,7 +6,7 @@ export async function signIn(page: Page, next = "/"): Promise<void> {
   await page.getByLabel("Username").fill("admin");
   await page.getByLabel("Password").fill("demo");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 }
 
 export function clientRow(page: Page, name: string) {

@@ -160,6 +160,9 @@ browser ──HTTP(S) over VPN──▶ Next.js panel (user: openvpn-panel, sand
   passphrase for the private key. The passphrase goes to the helper on
   **stdin** (never argv, logs or disk) and reaches `openvpn-install.sh` only
   through its environment; the audit log records only that one was set.
+- **Account** page: change the admin password (stored as an argon2id hash in
+  `/var/lib/openvpn-panel/auth.json`; `install.sh --reset-password` always
+  takes precedence) and sign out every other session.
 - **Renew** re-issues a client certificate (`openvpn-install.sh client renew`,
   optional validity in days) and downloads the new profile once. The old
   certificate is revoked, so the old profile stops working.

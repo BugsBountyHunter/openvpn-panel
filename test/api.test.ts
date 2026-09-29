@@ -1,7 +1,7 @@
 /**
  * Integration tests: real route handlers + proxy, demo backend, temp audit log.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
@@ -14,6 +14,8 @@ const auditPath = join(dir, "audit.log");
 type Routes = {
   login: typeof import("@/app/api/auth/login/route");
   logout: typeof import("@/app/api/auth/logout/route");
+  password: typeof import("@/app/api/auth/password/route");
+  sessions: typeof import("@/app/api/auth/sessions/route");
   clients: typeof import("@/app/api/clients/route");
   revoke: typeof import("@/app/api/clients/[name]/revoke/route");
   renew: typeof import("@/app/api/clients/[name]/renew/route");
@@ -40,6 +42,8 @@ beforeAll(async () => {
   r = {
     login: await import("@/app/api/auth/login/route"),
     logout: await import("@/app/api/auth/logout/route"),
+    password: await import("@/app/api/auth/password/route"),
+    sessions: await import("@/app/api/auth/sessions/route"),
     clients: await import("@/app/api/clients/route"),
     revoke: await import("@/app/api/clients/[name]/revoke/route"),
     renew: await import("@/app/api/clients/[name]/renew/route"),
@@ -52,7 +56,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
-beforeEach(() => r.demo.resetDemoState());
+const authPath = join(dir, "auth.json");
+beforeEach(() => {
+  r.demo.resetDemoState();
+  rmSync(authPath, { force: true });
+  (globalThis as Record<string, unknown>).__loginLimiter = undefined;
+});
 
 function req(path: string, init: { method?: string; body?: unknown; cookie?: string; origin?: string | null } = {}) {
   const headers: Record<string, string> = { host: "127.0.0.1:8081", "x-forwarded-for": "10.8.0.9" };
@@ -68,8 +77,8 @@ function req(path: string, init: { method?: string; body?: unknown; cookie?: str
 
 const params = (name: string) => ({ params: Promise.resolve({ name }) });
 
-async function login(): Promise<string> {
-  const res = await r.login.POST(req("/api/auth/login", { method: "POST", body: { username: "admin", password: "demo" } }));
+async function login(password = "demo"): Promise<string> {
+  const res = await r.login.POST(req("/api/auth/login", { method: "POST", body: { username: "admin", password } }));
   expect(res.status).toBe(200);
   const setCookie = res.headers.get("set-cookie") ?? "";
   expect(setCookie).toMatch(/HttpOnly/i);
@@ -189,6 +198,92 @@ describe("API", () => {
     const cookie = await login();
     const res = await r.logout.POST(req("/api/auth/logout", { method: "POST", cookie }), {});
     expect(res.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
+  });
+});
+
+describe("account security", () => {
+  const signedIn = async (cookie: string) => (await r.status.GET(req("/api/status", { cookie }), {})).status === 200;
+  const cookieOf = (res: Response) => (res.headers.get("set-cookie") ?? "").split(";")[0];
+
+  it("changes the password, signs out other sessions and keeps the current one", async () => {
+    const other = await login();
+    const current = await login();
+
+    const change = (body: unknown, cookie = current) =>
+      r.password.POST(req("/api/auth/password", { method: "POST", body, cookie }), {});
+
+    expect((await change({ currentPassword: "wrong", newPassword: "a much better passphrase" })).status).toBe(401);
+    expect(auditActions().at(-1)).toMatchObject({ action: "password_change", ok: false });
+    expect((await change({ currentPassword: "demo", newPassword: "short" })).status).toBe(400);
+    expect((await change({ currentPassword: "demo", newPassword: "demo" })).status).toBe(400);
+
+    const res = await change({ currentPassword: "demo", newPassword: "a much better passphrase" });
+    expect(res.status).toBe(200);
+    expect(auditActions().at(-1)).toMatchObject({ action: "password_change", ok: true });
+    const renewed = cookieOf(res);
+    expect(renewed).toMatch(/^ovpn_panel_session=/);
+
+    expect(await signedIn(renewed)).toBe(true);
+    expect(await signedIn(other)).toBe(false);
+    expect(r.proxy.proxy(req("/api/clients", { cookie: other, origin: null })).status).toBe(401);
+
+    const old = await r.login.POST(req("/api/auth/login", { method: "POST", body: { username: "admin", password: "demo" } }));
+    expect(old.status).toBe(401);
+    await login("a much better passphrase");
+
+    const stored = readFileSync(authPath, "utf8");
+    expect(stored).not.toContain("a much better passphrase");
+    expect(stored).toMatch(/"passwordHash":"\$argon2id\$/);
+    expect(statSync(authPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(auditPath, "utf8")).not.toContain("a much better passphrase");
+  });
+
+  it("rate-limits wrong current passwords", async () => {
+    const cookie = await login();
+    let last: Response | undefined;
+    for (let i = 0; i < 6; i++) {
+      last = await r.password.POST(
+        req("/api/auth/password", { method: "POST", body: { currentPassword: `nope-${i}`, newPassword: "a much better passphrase" }, cookie }),
+        {},
+      );
+    }
+    expect(last?.status).toBe(429);
+  });
+
+  it("refuses to sign out sessions while auth.json is damaged, keeping the file", async () => {
+    const before = await login();
+    writeFileSync(authPath, "{damaged");
+    // Fail safe: the damage signs out every existing session...
+    expect(await signedIn(before)).toBe(false);
+    // ...but signing in again works, and changing state is then refused.
+    const cookie = await login();
+    const res = await r.sessions.POST(req("/api/auth/sessions", { method: "POST", cookie }), {});
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatch(/--reset-password/);
+    expect(readFileSync(authPath, "utf8")).toBe("{damaged");
+  });
+
+  it("caps parallel wrong guesses at the limit", async () => {
+    const cookie = await login();
+    const attempt = (i: number) =>
+      r.password.POST(
+        req("/api/auth/password", { method: "POST", body: { currentPassword: `nope-${i}`, newPassword: "a much better passphrase" }, cookie }),
+        {},
+      );
+    const statuses = (await Promise.all(Array.from({ length: 10 }, (_, i) => attempt(i)))).map((res) => res.status);
+    expect(statuses.filter((s) => s === 401)).toHaveLength(5);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(5);
+  });
+
+  it("signs out every other session on request", async () => {
+    const other = await login();
+    const current = await login();
+    const res = await r.sessions.POST(req("/api/auth/sessions", { method: "POST", cookie: current }), {});
+    expect(res.status).toBe(200);
+    expect(await signedIn(cookieOf(res))).toBe(true);
+    expect(await signedIn(other)).toBe(false);
+    expect(auditActions().at(-1)).toMatchObject({ action: "sessions_revoked", ok: true });
+    expect((await r.sessions.POST(req("/api/auth/sessions", { method: "POST" }), {})).status).toBe(401);
   });
 });
 

@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Overview" },
   { href: "/clients", label: "Clients" },
   { href: "/audit", label: "Audit log" },
+  { href: "/account", label: "Account" },
 ] as const;
 
 export function NavLinks() {

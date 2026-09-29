@@ -1,5 +1,6 @@
 import { getConfig } from "../config";
 import { SESSION_COOKIE, verifySessionToken, type SessionPayload } from "./session";
+import { isSessionCurrent, readAuthState } from "./state";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -47,8 +48,10 @@ export function readSessionCookie(cookieHeader: string | null | undefined): stri
 }
 
 export function sessionFromHeaders(headers: Headers): SessionPayload | null {
-  const { sessionSecret, adminUser } = getConfig();
+  const { sessionSecret, adminUser, adminPasswordHash, authStatePath } = getConfig();
   const session = verifySessionToken(readSessionCookie(headers.get("cookie")), sessionSecret);
   // A change of ADMIN_USER invalidates existing sessions.
-  return session && session.sub === adminUser ? session : null;
+  if (!session || session.sub !== adminUser) return null;
+  // "Sign out other sessions" and any password change revoke older tokens.
+  return isSessionCurrent(session, adminPasswordHash, readAuthState(authStatePath)) ? session : null;
 }
