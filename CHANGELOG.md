@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-29
+
+**Upgrade notes**
+
+- Update with `sudo openvpn-panel-update`. It also installs the new root
+  helper (new `pki` and `renew` verbs, `add` options); the sudoers rule is
+  unchanged.
+- Everyone signed in to the panel is signed out once after the update:
+  sessions are now tied to the current password and session epoch.
+- A new `auth.json` appears next to the audit log
+  (`/var/lib/openvpn-panel/`) once the password is changed or other sessions
+  are signed out from the panel.
+
 ### Added
 
 - Clients table: status filter (active, online, offline, expiring within 30
@@ -20,7 +33,6 @@ All notable changes to this project are documented here. The format follows
   and "Sign out other sessions". Sessions are bound to a session epoch and to
   the active password, so both actions — and a password reset with the
   installer — end every other session immediately. Both are audited.
-  **Upgrade note:** existing sessions are signed out once.
 - Live view: overview and clients show "Live · updated Xs ago" with a
   Pause/Resume toggle (remembered per browser), and refresh immediately when
   the tab becomes visible again.
@@ -41,6 +53,11 @@ All notable changes to this project are documented here. The format follows
 - Management-interface reads (`status 3`, state/load-stats/version) are
   shared for 2 seconds, so several open tabs no longer queue on the
   single-client management socket. Disconnect, add, renew and revoke clear it.
+
+### Security
+
+- Sign-in and password-change attempts are counted before the (slow)
+  password check, so parallel guesses can no longer exceed the rate limit.
 
 ## [0.1.0] - 2026-09-29
 
@@ -68,4 +85,6 @@ First public release.
 Tested against a live OpenVPN 2.7.7 server on Ubuntu 24.04 and recorded
 output from OpenVPN 2.5 and 2.6.
 
+[Unreleased]: https://github.com/BugsBountyHunter/openvpn-panel/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/BugsBountyHunter/openvpn-panel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/BugsBountyHunter/openvpn-panel/releases/tag/v0.1.0
