@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "../config";
 import { attemptLogin } from "./login";
 import { hashPassword } from "./password";
-import { LoginRateLimiter } from "./rate-limit";
+import { DEFAULT_LOGIN_LIMITS, LoginRateLimiter } from "./rate-limit";
 import { verifySessionToken } from "./session";
 import { isSessionCurrent, readAuthState, sessionEpochFor, writeAuthState } from "./state";
 
@@ -47,6 +47,35 @@ describe("attemptLogin", () => {
     await attemptLogin({ username: "admin", password: "b", ip: "ip" }, config, limiter);
     const blocked = await attemptLogin({ username: "admin", password: "the-right-password", ip: "ip" }, config, limiter);
     expect(blocked).toMatchObject({ ok: false, status: 429 });
+  });
+
+  it("caps parallel failures at the per-IP limit", async () => {
+    const config = await liveConfig();
+    const limiter = new LoginRateLimiter();
+    const attempts = Array.from({ length: 10 }, (_, i) =>
+      attemptLogin({ username: "admin", password: `wrong-${i}`, ip: "10.8.0.9" }, config, limiter),
+    );
+    const statuses = (await Promise.all(attempts)).map((r) => (r.ok ? 200 : r.status));
+    expect(statuses.filter((s) => s === 401)).toHaveLength(DEFAULT_LOGIN_LIMITS.maxPerKey);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(10 - DEFAULT_LOGIN_LIMITS.maxPerKey);
+  });
+
+  it("lets a correct login through after failures and clears the per-IP bucket", async () => {
+    const config = await liveConfig();
+    const limiter = new LoginRateLimiter();
+    const ip = "10.8.0.10";
+    const wrong = () => attemptLogin({ username: "admin", password: "nope", ip }, config, limiter);
+    for (let i = 0; i < DEFAULT_LOGIN_LIMITS.maxPerKey - 1; i++) {
+      expect(await wrong()).toMatchObject({ ok: false, status: 401 });
+    }
+    const ok = await attemptLogin({ username: "admin", password: "the-right-password", ip }, config, limiter);
+    expect(ok.ok).toBe(true);
+    expect(limiter.retryAfter(ip)).toBe(0);
+    // A full fresh budget: maxPerKey more failures are 401 before the next is 429.
+    for (let i = 0; i < DEFAULT_LOGIN_LIMITS.maxPerKey; i++) {
+      expect(await wrong()).toMatchObject({ ok: false, status: 401 });
+    }
+    expect(await wrong()).toMatchObject({ ok: false, status: 429 });
   });
 
   it("accepts the demo password only in demo mode without a hash", async () => {
