@@ -57,8 +57,17 @@ export class LoginRateLimiter {
     }
   }
 
-  recordSuccess(key: string): void {
+  /**
+   * Clears the key and releases the global slot its attempt took. Callers
+   * record each attempt as a failure before verifying, so a success undoes
+   * that one count; earlier real failures from the key still count globally.
+   */
+  recordSuccess(key: string, now: number = Date.now()): void {
     this.buckets.delete(key);
+    const global = this.current(GLOBAL_KEY, now);
+    if (global && global.count > 0) {
+      this.buckets.set(GLOBAL_KEY, { count: global.count - 1, resetAt: global.resetAt });
+    }
   }
 
   private prune(now: number): void {

@@ -52,7 +52,7 @@ export async function attemptLogin(
   const passwordOk = await checkPassword(attempt.password, config, state);
   const userOk = safeEqual(attempt.username, config.adminUser);
   if (passwordOk && userOk) {
-    limiter.recordSuccess(attempt.ip);
+    limiter.recordSuccess(attempt.ip, now);
     const sessionEpoch = sessionEpochFor(config.adminPasswordHash, state);
     const token = createSessionToken(config.adminUser, config.sessionSecret, now, undefined, sessionEpoch);
     return { ok: true, token };

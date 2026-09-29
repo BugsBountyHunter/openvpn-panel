@@ -47,7 +47,7 @@ export const POST = withAuth(async (request, _ctx, { actor, ip }) => {
     await audit(config.auditLogPath, { actor, action: "password_change", target: null, ip, ok: false, detail: "wrong current password" });
     return fail("Current password is incorrect", 401);
   }
-  limiter.recordSuccess(ip);
+  limiter.recordSuccess(ip, now);
 
   let state;
   try {
