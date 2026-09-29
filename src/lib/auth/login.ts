@@ -43,6 +43,9 @@ export async function attemptLogin(
   if (retryAfter > 0) {
     return { ok: false, status: 429, error: "Too many failed attempts. Try again later.", retryAfter };
   }
+  // Count the attempt before the slow verify so parallel guesses cannot exceed
+  // the limit; a correct login clears it again.
+  limiter.recordFailure(attempt.ip, now);
   // Read once, before the slow verify, so the session matches what was checked.
   const state = readAuthState(config.authStatePath);
   // Always verify the password, even for a wrong username, to avoid a timing oracle.
@@ -54,6 +57,5 @@ export async function attemptLogin(
     const token = createSessionToken(config.adminUser, config.sessionSecret, now, undefined, sessionEpoch);
     return { ok: true, token };
   }
-  limiter.recordFailure(attempt.ip, now);
   return { ok: false, status: 401, error: "Invalid username or password" };
 }
