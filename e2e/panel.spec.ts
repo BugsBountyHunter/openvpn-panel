@@ -30,8 +30,33 @@ test("overview shows server status and online clients", async ({ page }) => {
 
 test("the server certificate is never listed", async ({ page }) => {
   await signIn(page, "/clients");
-  await page.getByLabel(/Show revoked/).check();
+  await page.getByLabel("Filter by status").selectOption("all");
   await expect(page.getByText(/^server_/)).toHaveCount(0);
+});
+
+test("clients can be filtered, searched and sorted", async ({ page }) => {
+  await signIn(page, "/clients");
+  const table = page.getByRole("table");
+  const dataRows = table.getByRole("row").filter({ has: page.getByRole("cell") });
+
+  await page.getByLabel("Filter by status").selectOption("expiring");
+  await expect(dataRows).toHaveCount(1);
+  await expect(clientRow(page, "erin-tablet")).toBeVisible();
+
+  await page.getByLabel("Filter by status").selectOption("active");
+  await page.getByLabel("Search clients by name or IP").fill("203.0.113");
+  await expect(dataRows).toHaveCount(2);
+  await expect(clientRow(page, "alice-laptop")).toBeVisible();
+  await expect(clientRow(page, "frank-home")).toBeVisible();
+
+  await page.getByLabel("Search clients by name or IP").fill("");
+  const nameHeader = table.getByRole("columnheader", { name: "Name" });
+  await nameHeader.getByRole("button").click();
+  await expect(nameHeader).toHaveAttribute("aria-sort", "ascending");
+  await expect(dataRows.first().getByRole("cell").first()).toHaveText("alice-laptop");
+  await nameHeader.getByRole("button").click();
+  await expect(nameHeader).toHaveAttribute("aria-sort", "descending");
+  await expect(dataRows.first().getByRole("cell").first()).toHaveText("frank-home");
 });
 
 test("add client downloads the profile", async ({ page }) => {
@@ -87,7 +112,7 @@ test("revoke asks for confirmation and hides the client", async ({ page }) => {
 
   await expect(page.getByRole("status")).toContainText('Revoked "e2e-laptop"');
   await expect(clientRow(page, "e2e-laptop")).toHaveCount(0);
-  await page.getByLabel(/Show revoked/).check();
+  await page.getByLabel("Filter by status").selectOption("revoked");
   await expect(clientRow(page, "e2e-laptop").getByText("revoked")).toBeVisible();
 });
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { Badge, Card, StatCard } from "@/components/ui";
+import { EXPIRY_WARNING_DAYS, isExpiringSoon } from "@/lib/client-view";
 import { formatBytes, formatDateTime, formatDuration } from "@/lib/format";
 import { loadSnapshot } from "@/lib/panel";
 
@@ -10,9 +11,7 @@ export default async function OverviewPage() {
   const { status, clients, now } = await loadSnapshot();
   const online = clients.filter((c) => c.online);
   const active = clients.filter((c) => c.status === "active").length;
-  const expiringSoon = clients.filter(
-    (c) => c.status === "active" && c.daysRemaining !== null && c.daysRemaining <= 30,
-  ).length;
+  const expiringSoon = clients.filter(isExpiringSoon).length;
 
   return (
     <div className="space-y-6">
@@ -43,7 +42,7 @@ export default async function OverviewPage() {
 
       {expiringSoon > 0 ? (
         <p className="rounded-lg border border-border bg-warn-bg px-4 py-2 text-sm text-warn">
-          {expiringSoon} certificate{expiringSoon === 1 ? " expires" : "s expire"} within 30 days.{" "}
+          {expiringSoon} certificate{expiringSoon === 1 ? " expires" : "s expire"} within {EXPIRY_WARNING_DAYS} days.{" "}
           <Link href="/clients" className="underline">Review clients</Link>
         </p>
       ) : null}
