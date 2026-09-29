@@ -34,6 +34,12 @@ export interface VpnClient {
   connectedSince: number | null;
 }
 
+/** Options for issuing a certificate; omitted fields use the installer's defaults. */
+export interface CertOptions {
+  /** Validity in days (see cert-days.ts for limits). */
+  certDays?: number;
+}
+
 /** Expiry dates of the server's PKI (epoch ms); null when unknown or not used. */
 export interface PkiStatus {
   serverCertExpiresAt: number | null;
@@ -53,6 +59,8 @@ export interface Backend {
   /** Creates a client and returns the .ovpn profile. Never persist it. */
   addClient(name: string): Promise<string>;
   revokeClient(name: string): Promise<void>;
+  /** Re-issues a client certificate and returns the new .ovpn profile. The old one stops working. */
+  renewClient(name: string, options?: CertOptions): Promise<string>;
   /** Returns true when a live session was found and killed. */
   disconnectClient(name: string): Promise<boolean>;
   getPki(): Promise<PkiStatus>;

@@ -11,6 +11,15 @@ describe("buildHelperArgs", () => {
     expect(buildHelperArgs("/usr/local/sbin/h", "pki")).toEqual(["-n", "--", "/usr/local/sbin/h", "pki"]);
   });
 
+  it("passes a validated certificate lifetime to renew", () => {
+    expect(buildHelperArgs("/h", "renew", "alice")).toEqual(["-n", "--", "/h", "renew", "alice"]);
+    expect(buildHelperArgs("/h", "renew", "alice", { certDays: 365 })).toEqual(["-n", "--", "/h", "renew", "alice", "365"]);
+    for (const certDays of [0, -1, 1.5, 7301, Number.NaN]) {
+      expect(() => buildHelperArgs("/h", "renew", "alice", { certDays })).toThrow(HelperError);
+    }
+    expect(() => buildHelperArgs("/h", "list", undefined, { certDays: 30 })).toThrow(HelperError);
+  });
+
   it("rejects bad or missing names", () => {
     expect(() => buildHelperArgs("/h", "add")).toThrow(HelperError);
     expect(() => buildHelperArgs("/h", "revoke", "$(reboot)")).toThrow(HelperError);

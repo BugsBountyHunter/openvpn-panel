@@ -1,4 +1,5 @@
-import type { Backend, PkiStatus, ServerStatus, VpnClient } from "../types";
+import { CERT_DAYS_DEFAULT } from "../cert-days";
+import type { Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
  * Fake backend for local development, screenshots and tests.
@@ -180,6 +181,15 @@ export class DemoBackend implements Backend {
           : c,
       ),
     });
+  }
+
+  async renewClient(name: string, options: CertOptions = {}): Promise<string> {
+    const state = getState();
+    const target = state.clients.find((c) => c.name === name);
+    if (!target || target.status === "revoked") throw new Error(`Client "${name}" cannot be renewed`);
+    const certExpiry = isoDate(Date.now() + (options.certDays ?? CERT_DAYS_DEFAULT) * DAY_MS);
+    setState({ ...state, clients: state.clients.map((c) => (c.name === name ? { ...c, certExpiry } : c)) });
+    return fakeProfile(name);
   }
 
   /** The CRL is close to expiry so demo mode shows the warning. */

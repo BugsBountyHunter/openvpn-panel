@@ -1,5 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { isValidCertDays } from "./cert-days";
 import { CLIENT_NAME_PATTERN } from "./names";
+import type { CertOptions } from "./types";
 
 /**
  * Runs the root-owned helper (server/openvpn-panel-helper) through
@@ -7,10 +9,10 @@ import { CLIENT_NAME_PATTERN } from "./names";
  * here too so bad input never reaches sudo.
  */
 
-export type HelperVerb = "add" | "revoke" | "list" | "status" | "pki";
+export type HelperVerb = "add" | "revoke" | "renew" | "list" | "status" | "pki";
 
 export interface HelperRunner {
-  run(verb: HelperVerb, name?: string): Promise<string>;
+  run(verb: HelperVerb, name?: string, options?: CertOptions): Promise<string>;
 }
 
 export class HelperError extends Error {
@@ -23,7 +25,8 @@ export class HelperError extends Error {
   }
 }
 
-const NEEDS_NAME: ReadonlySet<HelperVerb> = new Set(["add", "revoke"]);
+const NEEDS_NAME: ReadonlySet<HelperVerb> = new Set(["add", "revoke", "renew"]);
+const TAKES_CERT_DAYS: ReadonlySet<HelperVerb> = new Set(["renew"]);
 const MAX_STDERR = 500;
 
 // Minimal, fixed environment for the privileged call (cast: Next types require NODE_ENV).
@@ -32,10 +35,18 @@ const HELPER_ENV = {
   LANG: "C.UTF-8",
 } as unknown as NodeJS.ProcessEnv;
 
-export function buildHelperArgs(helperPath: string, verb: HelperVerb, name?: string): string[] {
+function optionArgs(verb: HelperVerb, options: CertOptions): string[] {
+  if (options.certDays === undefined) return [];
+  if (!TAKES_CERT_DAYS.has(verb)) throw new HelperError(`"${verb}" takes no certificate lifetime`, null);
+  if (!isValidCertDays(options.certDays)) throw new HelperError("Invalid certificate lifetime", null);
+  return [String(options.certDays)];
+}
+
+export function buildHelperArgs(helperPath: string, verb: HelperVerb, name?: string, options: CertOptions = {}): string[] {
+  const extra = optionArgs(verb, options);
   if (NEEDS_NAME.has(verb)) {
     if (!name || !CLIENT_NAME_PATTERN.test(name)) throw new HelperError("Invalid client name", null);
-    return ["-n", "--", helperPath, verb, name];
+    return ["-n", "--", helperPath, verb, name, ...extra];
   }
   if (name !== undefined) throw new HelperError(`"${verb}" takes no name`, null);
   return ["-n", "--", helperPath, verb];
@@ -57,8 +68,8 @@ export class SudoHelperRunner implements HelperRunner {
     private readonly sudoPath: string = "sudo",
   ) {}
 
-  run(verb: HelperVerb, name?: string): Promise<string> {
-    const args = buildHelperArgs(this.helperPath, verb, name);
+  run(verb: HelperVerb, name?: string, options?: CertOptions): Promise<string> {
+    const args = buildHelperArgs(this.helperPath, verb, name, options);
     return new Promise((resolve, reject) => {
       execFile(
         this.sudoPath,
@@ -74,7 +85,7 @@ export class SudoHelperRunner implements HelperRunner {
             resolve(stdout);
             return;
           }
-          // Never include stdout in errors: for "add" it may hold a private key.
+          // Never include stdout in errors: for "add"/"renew" it may hold a private key.
           const code = typeof error.code === "number" ? error.code : null;
           const reason = error.killed ? "timed out" : summarizeStderr(stderr) || error.message;
           reject(new HelperError(`Helper "${verb}" failed: ${reason}`, code));

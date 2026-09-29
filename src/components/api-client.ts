@@ -34,19 +34,29 @@ export async function apiPost(url: string, body?: unknown): Promise<void> {
   await postJson(url, body);
 }
 
-/** Creates a client and hands the profile straight to the browser as a download. */
-export async function addClientAndDownload(name: string): Promise<void> {
-  const response = await postJson("/api/clients", { name });
+/** Hands a profile response straight to the browser as a download; it is never stored. */
+async function download(response: Response, filename: string): Promise<void> {
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   try {
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${name}.ovpn`;
+    link.download = filename;
     document.body.append(link);
     link.click();
     link.remove();
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+}
+
+/** Creates a client and downloads its profile. */
+export async function addClientAndDownload(name: string): Promise<void> {
+  await download(await postJson("/api/clients", { name }), `${name}.ovpn`);
+}
+
+/** Renews a client certificate and downloads the new profile. */
+export async function renewClientAndDownload(name: string, certDays?: number): Promise<void> {
+  const response = await postJson(`/api/clients/${encodeURIComponent(name)}/renew`, { certDays });
+  await download(response, `${name}.ovpn`);
 }

@@ -3,7 +3,7 @@ import { HelperError, type HelperRunner } from "../helper";
 import { MgmtError, type MgmtClient } from "../mgmt/client";
 import { parseKill, parseLoadStats, parseState, parseStatus3, parseVersion, type MgmtClientEntry } from "../mgmt/parse";
 import { CLIENT_NAME_PATTERN } from "../names";
-import type { Backend, PkiStatus, ServerStatus, VpnClient } from "../types";
+import type { Backend, CertOptions, PkiStatus, ServerStatus, VpnClient } from "../types";
 
 /**
  * Backend for servers installed with angristan/openvpn-install:
@@ -77,6 +77,11 @@ export function parsePki(output: string): PkiStatus {
     caCertExpiresAt: toMs(parsed.data.ca_cert_not_after),
     crlNextUpdate: toMs(parsed.data.crl_next_update),
   };
+}
+
+function assertProfile(output: string): string {
+  if (!/^client\s*$/m.test(output)) throw new HelperError("Helper did not return a client profile", null);
+  return output;
 }
 
 function assertName(name: string): void {
@@ -213,11 +218,16 @@ export class LiveBackend implements Backend {
   async addClient(name: string): Promise<string> {
     assertName(name);
     try {
-      const profile = await this.helper.run("add", name);
-      if (!/^client\s*$/m.test(profile)) {
-        throw new HelperError("Helper did not return a client profile", null);
-      }
-      return profile;
+      return assertProfile(await this.helper.run("add", name));
+    } finally {
+      this.invalidateCerts();
+    }
+  }
+
+  async renewClient(name: string, options?: CertOptions): Promise<string> {
+    assertName(name);
+    try {
+      return assertProfile(await this.helper.run("renew", name, options));
     } finally {
       this.invalidateCerts();
     }
